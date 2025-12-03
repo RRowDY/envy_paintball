@@ -560,6 +560,106 @@ function RemovePlayerFromMatch(playerId, matchId, reason)
     end
 end
 
+-- Calculate post-match stats and MVP
+local function CalculatePostMatchStats(match)
+    local postMatchData = {
+        gameModeId = match.gameMode.id,
+        gameModeName = match.gameMode.name,
+        players = {},
+        winningTeam = nil,
+        losingTeam = nil,
+        mvpWinning = nil,
+        mvpLosing = nil
+    }
+    
+    -- Determine winning/losing teams
+    if match.gameMode.id == "tdm" or match.gameMode.id == "2v2_ramps" then
+        local maxScore = 0
+        local winningTeamNum = nil
+        for teamNum, score in pairs(match.teamScores) do
+            if score > maxScore then
+                maxScore = score
+                winningTeamNum = teamNum
+            end
+        end
+        postMatchData.winningTeam = winningTeamNum
+        
+        -- Find losing team
+        for teamNum, score in pairs(match.teamScores) do
+            if teamNum ~= winningTeamNum then
+                postMatchData.losingTeam = teamNum
+                break
+            end
+        end
+    end
+    
+    -- Calculate stats for each player
+    local bestWinningScore = -1
+    local bestLosingScore = -1
+    local mvpWinningId = nil
+    local mvpLosingId = nil
+    
+    for _, playerId in ipairs(match.players) do
+        local xPlayer = ESX.GetPlayerFromId(playerId)
+        if xPlayer then
+            local kills = match.playerKills[playerId] or 0
+            local deaths = match.playerDeaths[playerId] or 0
+            local score = match.playerScores[playerId] or 0
+            local team = GetPlayerTeam(match, playerId)
+            
+            -- Calculate K/D ratio
+            local kdRatio = 0
+            if deaths > 0 then
+                kdRatio = kills / deaths
+            elseif kills > 0 then
+                kdRatio = kills -- Perfect K/D if no deaths
+            end
+            
+            -- Calculate MVP score (weighted: kills * 2 + kdRatio * 10)
+            local mvpScore = (kills * 2) + (kdRatio * 10)
+            
+            local playerData = {
+                id = playerId,
+                name = xPlayer.getName(),
+                team = team,
+                kills = kills,
+                deaths = deaths,
+                kdRatio = math.floor(kdRatio * 10) / 10, -- Round to 1 decimal
+                score = score,
+                mvpScore = mvpScore
+            }
+            
+            table.insert(postMatchData.players, playerData)
+            
+            -- Determine MVP for winning/losing teams
+            if match.gameMode.id == "tdm" or match.gameMode.id == "2v2_ramps" then
+                if team == postMatchData.winningTeam then
+                    if mvpScore > bestWinningScore then
+                        bestWinningScore = mvpScore
+                        mvpWinningId = playerId
+                    end
+                elseif team == postMatchData.losingTeam then
+                    if mvpScore > bestLosingScore then
+                        bestLosingScore = mvpScore
+                        mvpLosingId = playerId
+                    end
+                end
+            else
+                -- FFA/1v1: Single MVP
+                if mvpScore > bestWinningScore then
+                    bestWinningScore = mvpScore
+                    mvpWinningId = playerId
+                end
+            end
+        end
+    end
+    
+    postMatchData.mvpWinning = mvpWinningId
+    postMatchData.mvpLosing = mvpLosingId
+    
+    return postMatchData
+end
+
 function EndMatch(matchId, reason)
     local match = activeMatches[matchId]
     if not match then return end
@@ -567,6 +667,12 @@ function EndMatch(matchId, reason)
     -- Store original status before changing it
     local wasActive = match.status == "active"
     match.status = "ended"
+    
+    -- Calculate post-match stats
+    local postMatchData = nil
+    if wasActive then
+        postMatchData = CalculatePostMatchStats(match)
+    end
     
     -- Remove weapons
     if match.weaponHashes then
@@ -608,6 +714,14 @@ function EndMatch(matchId, reason)
         
         TriggerClientEvent('envy_paintball:matchEnded', playerId)
         TriggerClientEvent('ESX:Notify', playerId, "info", 5000, string.format("Match ended: %s", reason))
+        
+        -- Show post-match scoreboard if match was active
+        if wasActive and postMatchData then
+            CreateThread(function()
+                Wait(1000) -- Wait a moment for match end processing
+                TriggerClientEvent('envy_paintball:showPostMatchScoreboard', playerId, postMatchData)
+            end)
+        end
     end
 
     activeMatches[matchId] = nil
@@ -1681,6 +1795,7 @@ end
 -- ============================================================================
 -- KILL REWARDS AND SCORING
 -- ============================================================================
+
 
 RegisterNetEvent('esx:onPlayerDeath', function(data)
     local victimId = source

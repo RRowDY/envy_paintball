@@ -911,6 +911,7 @@ end)
 
 -- Scoreboard toggle state
 local scoreboardVisible = false
+local postMatchScoreboardVisible = false
 local scoreboardData = nil
 
 -- Update scoreboard data
@@ -962,8 +963,27 @@ CreateThread(function()
                 scoreboardVisible = false
             end
             scoreboardData = nil
+            
+            -- Handle G key for post-match scoreboard (close)
+            if IsControlJustPressed(0, 47) then -- G key (press)
+                if postMatchScoreboardVisible then
+                    SendNUIMessage({ action = 'hidePostMatchScoreboard' })
+                    postMatchScoreboardVisible = false
+                    SetNuiFocus(false, false) -- Disable cursor and NUI focus
+                end
+            end
         end
     end
+end)
+
+-- Show post-match scoreboard
+RegisterNetEvent('envy_paintball:showPostMatchScoreboard', function(postMatchData)
+    postMatchScoreboardVisible = true
+    SetNuiFocus(true, true) -- Enable cursor and NUI focus
+    SendNUIMessage({
+        action = 'showPostMatchScoreboard',
+        data = postMatchData
+    })
 end)
 
 RegisterNetEvent('envy_paintball:matchEnded', function()
@@ -1033,6 +1053,24 @@ RegisterNetEvent('envy_paintball:giveWeapon', function(weaponHash, ammo)
     
     local ammoAmount = ammo or Config.PaintballAmmo
     paintballWeaponHash = weaponHash
+    
+    -- Check if player has a weapon equipped
+    local currentWeapon = GetSelectedPedWeapon(ped)
+    local unarmedHash = `WEAPON_UNARMED`
+    
+    if currentWeapon ~= unarmedHash then
+        -- Player has a weapon equipped, unequip it first
+        -- Disarm ox_inventory weapon if it exists
+        if GetResourceState("ox_inventory") == "started" then
+            TriggerEvent('ox_inventory:disarm', true) -- true = no animation
+        end
+    end
+    
+    -- Remove all weapons to ensure clean state
+    RemoveAllPedWeapons(ped, true)
+    
+    -- Disable ox_inventory weapon handling (already handled by IsInPaintball export, but ensure it's set)
+    -- The IsInPaintball export should already prevent ox_inventory from interfering
     
     -- Give weapon (allow on respawn, so don't check weaponGiven)
     GiveWeaponToPed(ped, weaponHash, ammoAmount, false, true)
@@ -1212,17 +1250,6 @@ CreateThread(function()
             end
         end
     end
-end)
-
--- Handle player death (listen to ESX death event when in paintball match)
-AddEventHandler('esx:onPlayerDeath', function(data)
-    if not inMatch then return end
-    
-    isDead = true
-    local ped = PlayerPedId()
-    
-    -- Server already received the esx:onPlayerDeath event and will handle scoring/respawn
-    -- We just track the death state locally for respawn handling
 end)
 
 -- Respawn ped function (simplified version for paintball)
@@ -2348,6 +2375,12 @@ RegisterNUICallback('selectTeam', function(data, cb)
     SetNuiFocus(false, false)
     Wait(100)
     StartPlacingSpawn(team)
+    cb('ok')
+end)
+
+RegisterNUICallback('hidePostMatchScoreboard', function(data, cb)
+    postMatchScoreboardVisible = false
+    SetNuiFocus(false, false) -- Disable cursor and NUI focus
     cb('ok')
 end)
 

@@ -744,6 +744,133 @@ const ScoreboardManager = {
     }
 };
 
+// ============================================================================
+// POST-MATCH SCOREBOARD MANAGER
+// ============================================================================
+const PostMatchScoreboardManager = {
+    uiElement: null,
+    titleElement: null,
+    bodyElement: null,
+    closeBtn: null,
+    isVisible: false,
+
+    init() {
+        this.uiElement = document.getElementById('postmatch-scoreboard-ui');
+        this.titleElement = document.getElementById('postmatch-title');
+        this.bodyElement = document.getElementById('postmatch-body');
+        this.closeBtn = document.getElementById('postmatch-close-btn');
+        
+        if (this.closeBtn) {
+            this.closeBtn.addEventListener('click', () => {
+                this.hide();
+            });
+        }
+        
+        // Listen for G key press when scoreboard is visible
+        document.addEventListener('keydown', (e) => {
+            // G key (keyCode 71) or 'g' key
+            if ((e.keyCode === 71 || e.key === 'g' || e.key === 'G') && this.uiElement && !this.uiElement.classList.contains('hidden')) {
+                e.preventDefault();
+                this.hide();
+            }
+        });
+    },
+
+    show(postMatchData) {
+        if (!this.uiElement || !postMatchData) return;
+        
+        this.isVisible = true;
+        this.uiElement.classList.remove('hidden');
+        
+        // Set title
+        if (this.titleElement) {
+            this.titleElement.textContent = `${postMatchData.gameModeName || 'Match'} Results`;
+        }
+        
+        // Build content
+        let html = '';
+        
+        // Group players by team if team-based mode
+        if (postMatchData.winningTeam !== null && postMatchData.winningTeam !== undefined) {
+            // Team-based mode
+            const winningTeamPlayers = postMatchData.players.filter(p => p.team === postMatchData.winningTeam);
+            const losingTeamPlayers = postMatchData.players.filter(p => p.team === postMatchData.losingTeam);
+            
+            // Winning team
+            html += this.renderTeamSection(winningTeamPlayers, 'Winning Team', true, postMatchData.mvpWinning);
+            
+            // Losing team
+            html += this.renderTeamSection(losingTeamPlayers, 'Losing Team', false, postMatchData.mvpLosing);
+        } else {
+            // FFA/1v1 mode - single MVP
+            html += this.renderTeamSection(postMatchData.players, 'Players', null, postMatchData.mvpWinning);
+        }
+        
+        if (this.bodyElement) {
+            this.bodyElement.innerHTML = html;
+        }
+    },
+
+    renderTeamSection(players, teamLabel, isWinning, mvpId) {
+        if (!players || players.length === 0) return '';
+        
+        // Sort by MVP score (descending)
+        const sortedPlayers = [...players].sort((a, b) => (b.mvpScore || 0) - (a.mvpScore || 0));
+        
+        let html = `<div class="postmatch-team-section">`;
+        html += `<div class="postmatch-team-header ${isWinning === true ? 'winning' : isWinning === false ? 'losing' : ''}">${teamLabel}</div>`;
+        html += `<table class="postmatch-stats-table">`;
+        html += `<thead><tr>`;
+        html += `<th>Player</th>`;
+        html += `<th>K</th>`;
+        html += `<th>D</th>`;
+        html += `<th>K/D</th>`;
+        html += `<th>Score</th>`;
+        html += `</tr></thead>`;
+        html += `<tbody>`;
+        
+        sortedPlayers.forEach(player => {
+            const isMVP = player.id === mvpId;
+            html += `<tr class="${isMVP ? 'mvp' : ''}">`;
+            html += `<td class="postmatch-player-name">${this.escapeHtml(player.name || 'Unknown')}${isMVP ? '<span class="postmatch-mvp-badge">MVP</span>' : ''}</td>`;
+            html += `<td class="postmatch-stat">${player.kills || 0}</td>`;
+            html += `<td class="postmatch-stat">${player.deaths || 0}</td>`;
+            html += `<td class="postmatch-stat ${isMVP ? 'highlight' : ''}">${player.kdRatio || 0.0}</td>`;
+            html += `<td class="postmatch-stat">${player.score || 0}</td>`;
+            html += `</tr>`;
+        });
+        
+        html += `</tbody></table>`;
+        html += `</div>`;
+        
+        return html;
+    },
+
+    hide() {
+        if (!this.uiElement) return;
+        
+        this.isVisible = false;
+        this.uiElement.classList.add('hidden');
+        
+        // Notify client to disable NUI focus
+        if (typeof GetParentResourceName === 'function') {
+            fetch(`https://${GetParentResourceName()}/hidePostMatchScoreboard`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({})
+            }).catch(() => {});
+        }
+    },
+
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+};
+
 const PressEUIManager = {
     element: null,
     textElement: null,
@@ -2728,6 +2855,12 @@ window.addEventListener('message', function(event) {
         case 'hideScoreboard':
             ScoreboardManager.hide();
             break;
+        case 'showPostMatchScoreboard':
+            PostMatchScoreboardManager.show(data.data || data);
+            break;
+        case 'hidePostMatchScoreboard':
+            PostMatchScoreboardManager.hide();
+            break;
     }
 });
 
@@ -2738,6 +2871,7 @@ function init() {
     MenuManager.init();
     PressEUIManager.init();
     ScoreboardManager.init();
+    PostMatchScoreboardManager.init();
 
 // Notify NUI ready
 function notifyNUIReady() {
