@@ -10,7 +10,7 @@ Config.PedLocation = {
 -- Interaction Settings
 Config.InteractionDistance = 2.5 -- Distance to interact with PED
 Config.InteractionKey = 38 -- E key
-Config.MaxDistanceFromPed = 50 -- Maximum distance from PED before being removed from match (in meters)
+Config.MaxDistanceFromPed = 35 -- Maximum distance from PED before being removed from match (in meters)
 
 -- Game Modes
 Config.GameModes = {
