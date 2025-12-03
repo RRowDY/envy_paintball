@@ -4,12 +4,8 @@
 
 return {
     weapons = {
-        { hash = -1063057011, name = "Special Carbine", category = "rifles", enabled = true },
-        { hash = 584646201, name = "AP Pistol", category = "pistols", enabled = true },
-        { hash = 2024373456, name = "SMG Mk2", category = "smgs", enabled = true },
-        { hash = -1357824103, name = "Advanced Rifle", category = "rifles", enabled = true },
-        { hash = -608341376, name = "Combat MG MK2", category = "rifles", enabled = true },
-        { hash = 889558306, name = "Animated BASP", category = "smgs", enabled = true },
-        { hash = -1074790547, name = "Assault Rifle", category = "rifles", enabled = true }
+        { hash = 49308671, name = "GREENT", category = "rifles", enabled = true },
+        { hash = -901401918, name = "SPYDER", category = "rifles", enabled = true },
+        { hash = 584646201, name = "AP Pistol", category = "pistols", enabled = true }
     }
 }
