@@ -12,6 +12,8 @@ shared_scripts {
 }
 
 client_scripts {
+    '@PolyZone/client.lua',
+    '@PolyZone/CircleZone.lua',
     'client/*.lua'
 }
 
@@ -30,6 +32,7 @@ files {
 
 dependencies {
     'es_extended',
-    'oxmysql'
+    'oxmysql',
+    'PolyZone'
 }
 

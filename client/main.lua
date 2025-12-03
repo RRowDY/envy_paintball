@@ -23,6 +23,8 @@ local aimPosition = nil
 local recentlyPlaced = {}
 local paintballWeaponHash = nil
 local weaponGiven = false
+local boundaryZone = nil
+local editorZone = nil
 
 -- Export for OX Inventory
 exports('IsInPaintball', function()
@@ -235,6 +237,35 @@ function OpenMapSelectionMenu(gameMode)
 end
 
 -- ============================================================================
+-- MAP EDITOR HELPER FUNCTIONS
+-- ============================================================================
+
+local function updateEditorZone()
+    -- Destroy existing editor zone if any
+    if editorZone then
+        editorZone:destroy()
+        editorZone = nil
+    end
+    
+    -- Create new zone if center and radius are set
+    if currentMapData and currentMapData.center and currentMapData.radius then
+        local center = currentMapData.center
+        local radius = currentMapData.radius
+        
+        if center.x and center.y and center.z and radius > 0 then
+            local centerVec3 = vector3(center.x, center.y, center.z)
+            
+            editorZone = CircleZone:Create(centerVec3, radius, {
+                name = "paintball_editor_zone",
+                useZ = true, -- Enable 3D sphere visualization
+                debugPoly = true, -- Make it visible
+                debugColor = {0, 255, 0, 30} -- Green color with transparency for editor
+            })
+        end
+    end
+end
+
+-- ============================================================================
 -- NUI CALLBACKS
 -- ============================================================================
 
@@ -311,15 +342,17 @@ RegisterNUICallback('loadMapForEdit', function(data, cb)
                 Wait(500)
             end
             
+            -- Create editor zone for loaded map
+            updateEditorZone()
+            
             if currentMapData.center and freecam then
                 SetCamCoord(freecam, currentMapData.center.x, currentMapData.center.y, currentMapData.center.z + 50.0)
             end
             
+            -- Close the map selection UI
             SendNUIMessage({ action = 'hideMenu', menu = 'map' })
-            CreateThread(function()
-                Wait(100)
-                SetNuiFocus(false, false)
-            end)
+            SendNUIMessage({ action = 'hideMenu', menu = 'editorMain' })
+            SetNuiFocus(false, false)
             ESX.ShowNotification(string.format("~g~Map '%s' loaded for editing! Press F5 for menu~s~", mapToEdit.name), "success", 3000)
         else
             ESX.ShowNotification("Map not found!", "error", 3000)
@@ -543,6 +576,93 @@ RegisterNUICallback('nuiReady', function(data, cb)
 end)
 
 -- ============================================================================
+-- BOUNDARY ZONE HELPER FUNCTIONS
+-- ============================================================================
+
+local function createBoundaryZone(matchData)
+    if not matchData or not matchData.map or not matchData.map.center or not matchData.map.radius then
+        return
+    end
+    
+    local center = matchData.map.center
+    local radius = matchData.map.radius
+    
+    if not center or not center.x or not center.y or not center.z or not radius or radius <= 0 then
+        return
+    end
+    
+    local centerVec3 = vector3(center.x, center.y, center.z)
+    
+    -- Destroy existing zone if any
+    if boundaryZone then
+        boundaryZone:destroy()
+        boundaryZone = nil
+    end
+    
+    -- Create new CircleZone with sphere visualization
+    boundaryZone = CircleZone:Create(centerVec3, radius, {
+        name = "paintball_boundary",
+        useZ = true, -- Enable 3D sphere instead of 2D circle
+        debugPoly = true, -- Make it visible to players
+        debugColor = {255, 0, 0, 48} -- Red color with transparency
+    })
+    
+    -- Handle player entering/exiting the zone
+    boundaryZone:onPlayerInOut(function(isInside, point)
+        -- Only handle when player exits the zone (isInside is false)
+        if isInside or not inMatch or not activeMatchData then return end
+        
+        local matchData = activeMatchData
+        local spawns = matchData.map and matchData.map.spawns
+        local ped = PlayerPedId()
+        local pedCoords = GetEntityCoords(ped)
+        
+        if spawns and #spawns > 0 then
+            -- Select a random spawn point
+            local spawnIndex = math.random(1, #spawns)
+            local spawn = spawns[spawnIndex]
+            
+            if spawn and spawn.x and spawn.y and spawn.z then
+                -- Teleport player to spawn point
+                SetEntityCoords(ped, spawn.x, spawn.y, spawn.z, false, false, false, true)
+                if spawn.w then
+                    SetEntityHeading(ped, spawn.w)
+                end
+                
+                ESX.ShowNotification("~r~You left the match boundary! Respawned at spawn point.~s~", "error", 3000)
+            end
+        else
+            -- Fallback: push back towards center if no spawn points available
+            local center = matchData.map.center
+            if center then
+                local dx = pedCoords.x - center.x
+                local dy = pedCoords.y - center.y
+                local distance2D = math.sqrt(dx * dx + dy * dy)
+                
+                if distance2D > 0.001 then
+                    local directionX = -dx / distance2D
+                    local directionY = -dy / distance2D
+                    local newX = center.x + directionX * (radius - 0.5)
+                    local newY = center.y + directionY * (radius - 0.5)
+                    local foundGround, groundZ = GetGroundZFor_3dCoord(newX, newY, pedCoords.z + 10.0)
+                    local newZ = foundGround and groundZ or pedCoords.z
+                    SetEntityCoordsNoOffset(ped, newX, newY, newZ, false, false, false)
+                    
+                    ESX.ShowNotification("~r~You cannot leave the match boundary!~s~", "error", 2000)
+                end
+            end
+        end
+    end)
+end
+
+local function destroyBoundaryZone()
+    if boundaryZone then
+        boundaryZone:destroy()
+        boundaryZone = nil
+    end
+end
+
+-- ============================================================================
 -- NET EVENTS - MATCH EVENTS
 -- ============================================================================
 
@@ -579,6 +699,10 @@ RegisterNetEvent('envy_paintball:matchActive', function(matchData)
     activeMatchData = matchData
     weaponGiven = false
     LocalPlayer.state:set('invBusy', true, true)
+    
+    -- Create PolyZone circle zone for boundary
+    createBoundaryZone(matchData)
+    
     ESX.ShowNotification("Match started! Good luck!", "success")
 end)
 
@@ -591,6 +715,10 @@ RegisterNetEvent('envy_paintball:matchEnded', function()
     LocalPlayer.state:set('invBusy', false, true)
     paintballWeaponHash = nil
     weaponGiven = false
+    
+    -- Destroy boundary zone
+    destroyBoundaryZone()
+    
     ESX.ShowNotification("Match ended!", "info")
 end)
 
@@ -603,6 +731,9 @@ RegisterNetEvent('envy_paintball:matchJoined', function(matchData)
             inMatch = true
             activeMatchData = matchData
             LocalPlayer.state:set('invBusy', true, true)
+            
+            -- Create PolyZone circle zone for boundary
+            createBoundaryZone(matchData)
         end
     end
     ESX.ShowNotification("Joined match! Good luck!", "success")
@@ -742,97 +873,11 @@ CreateThread(function()
 end)
 
 -- ============================================================================
--- MATCH RADIUS VISUALIZATION AND BOUNDARY ENFORCEMENT
+-- MATCH BOUNDARY ZONE (Handled by PolyZone CircleZone)
 -- ============================================================================
-
-CreateThread(function()
-    local lastWarningTime = 0
-    local warningCooldown = 2000 -- 2 seconds between warnings
-    
-    while true do
-        if inMatch and activeMatchData and activeMatchData.map and activeMatchData.map.center and activeMatchData.map.radius then
-            Wait(0)
-            -- Store local reference to prevent race condition
-            local matchData = activeMatchData
-            if matchData and matchData.map and matchData.map.center and matchData.map.radius then
-                -- Get center point from map (ensure it's valid)
-                local center = matchData.map.center
-                if center and center.x and center.y and center.z then
-                    local centerX = center.x
-                    local centerY = center.y
-                    local centerZ = center.z
-                    local radius = matchData.map.radius
-                    
-                    if radius and radius > 0 then
-                
-                local radiusSize = radius * 2.0
-                
-                -- Draw red radius boundary using marker at the exact center point
-                DrawMarker(28, centerX, centerY, centerZ, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, radiusSize, radiusSize, radiusSize, 255, 0, 0, 30, false, true, 2, false, false, false, false)
-                
-                -- Boundary enforcement - adjust offset to match visual marker
-                -- Marker type 28: size parameter is diameter, so visual radius = radiusSize/2 = radius
-                -- But marker may render slightly differently, so we use an offset to match
-                local boundaryOffset = 24.0 -- Adjust this value to match the visual marker exactly
-                local boundaryRadius = radius + boundaryOffset
-                
-                local ped = PlayerPedId()
-                local pedCoords = GetEntityCoords(ped)
-                
-                -- Calculate distance from center point (only X and Y, ignore Z for boundary)
-                local dx = pedCoords.x - centerX
-                local dy = pedCoords.y - centerY
-                local distance2D = math.sqrt(dx * dx + dy * dy)
-                
-                -- If player is outside the boundary radius, respawn them at a spawn point
-                if distance2D > boundaryRadius then
-                    -- Get spawn points from map
-                    local spawns = matchData.map.spawns
-                    
-                    if spawns and #spawns > 0 then
-                        -- Select a random spawn point
-                        local spawnIndex = math.random(1, #spawns)
-                        local spawn = spawns[spawnIndex]
-                        
-                        if spawn and spawn.x and spawn.y and spawn.z then
-                            -- Teleport player to spawn point
-                            SetEntityCoords(ped, spawn.x, spawn.y, spawn.z, false, false, false, true)
-                            if spawn.w then
-                                SetEntityHeading(ped, spawn.w)
-                            end
-                            
-                            -- Show notification (with cooldown to avoid spam)
-                            local currentTime = GetGameTimer()
-                            if currentTime - lastWarningTime > warningCooldown then
-                                ESX.ShowNotification("~r~You left the match boundary! Respawned at spawn point.~s~", "error", 3000)
-                                lastWarningTime = currentTime
-                            end
-                        end
-                    else
-                        -- Fallback: push back towards center if no spawn points available
-                        local directionX = -dx / (distance2D + 0.001)
-                        local directionY = -dy / (distance2D + 0.001)
-                        local newX = centerX + directionX * (boundaryRadius - 0.5)
-                        local newY = centerY + directionY * (boundaryRadius - 0.5)
-                        local foundGround, groundZ = GetGroundZFor_3dCoord(newX, newY, pedCoords.z + 10.0)
-                        local newZ = foundGround and groundZ or pedCoords.z
-                        SetEntityCoordsNoOffset(ped, newX, newY, newZ, false, false, false)
-                        
-                        local currentTime = GetGameTimer()
-                        if currentTime - lastWarningTime > warningCooldown then
-                            ESX.ShowNotification("~r~You cannot leave the match boundary!~s~", "error", 2000)
-                            lastWarningTime = currentTime
-                        end
-                    end
-                end
-                    end
-                end
-            end
-        else
-            Wait(500)
-        end
-    end
-end)
+-- Boundary enforcement is now handled by PolyZone CircleZone
+-- The zone is created when a match starts and destroyed when it ends
+-- Visualization is handled automatically by PolyZone with debugPoly enabled
 
 -- ============================================================================
 -- ADMIN STATUS CHECK
@@ -1056,6 +1101,9 @@ function StartMapEditor()
     recentlyPlaced = {}
     StartFreecam()
     
+    -- Create editor zone if center already exists
+    updateEditorZone()
+    
     CreateThread(function()
         while mapEditorActive do
             Wait(0)
@@ -1127,22 +1175,64 @@ function StartMapEditor()
                 end
                 
                 if aimPosition then
-                    DrawMarker(27, aimPosition.x, aimPosition.y, aimPosition.z, 0.0, 0.0, 0.0, 0.0, 180.0, 0.0, 0.5, 0.5, 0.1, 0, 255, 255, 255, false, false, 2, false, false, false, false)
+                    -- Check if spawn point is inside zone for visual feedback
+                    local isInsideZone = true
+                    local markerColor = {0, 255, 255} -- Cyan for valid
+                    
+                    if placingType == "spawn" and currentMapData and currentMapData.center then
+                        local spawnPoint = vector3(aimPosition.x, aimPosition.y, aimPosition.z)
+                        if editorZone then
+                            isInsideZone = editorZone:isPointInside(spawnPoint)
+                        else
+                            -- Fallback: manual check
+                            local center = currentMapData.center
+                            local radius = currentMapData.radius
+                            if center and radius then
+                                local centerVec3 = vector3(center.x, center.y, center.z)
+                                local distance = #(spawnPoint - centerVec3)
+                                isInsideZone = distance <= radius
+                            end
+                        end
+                        
+                        if not isInsideZone then
+                            markerColor = {255, 0, 0} -- Red for invalid
+                        end
+                    end
+                    
+                    DrawMarker(27, aimPosition.x, aimPosition.y, aimPosition.z, 0.0, 0.0, 0.0, 0.0, 180.0, 0.0, 0.5, 0.5, 0.1, markerColor[1], markerColor[2], markerColor[3], 255, false, false, 2, false, false, false, false)
                     
                     if placingType == "center" then
+                        -- Show preview zone using PolyZone-style visualization
                         local radiusSize = currentMapData.radius * 2.0
                         DrawMarker(28, aimPosition.x, aimPosition.y, aimPosition.z, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, radiusSize, radiusSize, radiusSize, 0, 255, 0, 30, false, true, 2, false, false, false, false)
                     end
                     
-                    local placeText = placingType == "center" and string.format("~y~CENTER POINT~s~\nPress ~g~E~s~ to place\n~b~Scroll~s~ to adjust radius: ~y~%.1fm~s~", currentMapData.radius) or "~y~SPAWN POINT~s~\nPress ~g~E~s~ to place"
+                    local placeText = ""
+                    if placingType == "center" then
+                        placeText = string.format("~y~CENTER POINT~s~\nPress ~g~E~s~ to place\n~b~Scroll~s~ to adjust radius: ~y~%.1fm~s~", currentMapData.radius)
+                    elseif placingType == "spawn" then
+                        if not isInsideZone then
+                            placeText = "~r~SPAWN POINT (OUTSIDE ZONE)~s~\n~r~Must be inside the zone boundary!~s~"
+                        else
+                            placeText = "~y~SPAWN POINT~s~\nPress ~g~E~s~ to place"
+                        end
+                    end
                     DrawText3D(aimPosition.x, aimPosition.y, aimPosition.z + 2.0, placeText)
                 end
                 
                 if placingType == "center" then
                     if IsDisabledControlJustPressed(0, 17) then
                         currentMapData.radius = math.min(currentMapData.radius + 1.0, 200.0)
+                        -- Update zone if center is already placed
+                        if currentMapData.center then
+                            updateEditorZone()
+                        end
                     elseif IsDisabledControlJustPressed(0, 16) then
                         currentMapData.radius = math.max(currentMapData.radius - 1.0, 5.0)
+                        -- Update zone if center is already placed
+                        if currentMapData.center then
+                            updateEditorZone()
+                        end
                     end
                 end
                 
@@ -1160,8 +1250,43 @@ function StartMapEditor()
                             ESX.ShowNotification("~g~✓ Center point placed!~s~", "success", 3000)
                             placingPoint = false
                             placingType = nil
+                            -- Create/update the editor zone
+                            updateEditorZone()
                         elseif placingType == "spawn" then
-                            local spawn = {
+                            -- Validate spawn point is inside zone
+                            if not currentMapData.center then
+                                ESX.ShowNotification("~r~Error: Center point must be set before placing spawn points!~s~", "error", 4000)
+                                PlaySoundFrontend(-1, "CHECKPOINT_MISSED", "HUD_MINI_GAME_SOUNDSET", true)
+                                placingPoint = false
+                                placingType = nil
+                                selectedTeam = nil
+                                return
+                            end
+                            
+                            -- Check if spawn point is inside the zone
+                            local spawnPoint = vector3(aimPosition.x, aimPosition.y, aimPosition.z)
+                            local isInside = false
+                            
+                            if editorZone then
+                                isInside = editorZone:isPointInside(spawnPoint)
+                            else
+                                -- Fallback: manual check if zone doesn't exist yet
+                                local center = currentMapData.center
+                                local radius = currentMapData.radius
+                                if center and radius then
+                                    local centerVec3 = vector3(center.x, center.y, center.z)
+                                    local distance = #(spawnPoint - centerVec3)
+                                    isInside = distance <= radius
+                                end
+                            end
+                            
+                            if not isInside then
+                                ESX.ShowNotification("~r~Error: Spawn point must be inside the zone boundary!~s~", "error", 4000)
+                                PlaySoundFrontend(-1, "CHECKPOINT_MISSED", "HUD_MINI_GAME_SOUNDSET", true)
+                                -- Don't return - allow user to continue or press ESC to cancel
+                            else
+                                -- Only place spawn if validation passes
+                                local spawn = {
                                 x = aimPosition.x,
                                 y = aimPosition.y,
                                 z = aimPosition.z,
@@ -1176,12 +1301,13 @@ function StartMapEditor()
                                 duration = 3000,
                                 team = selectedTeam
                             })
-                            PlaySoundFrontend(-1, "CHECKPOINT_PERFECT", "HUD_MINI_GAME_SOUNDSET", true)
-                            local teamText = selectedTeam and string.format(" (Team %d)", selectedTeam) or ""
-                            ESX.ShowNotification(string.format("~g~✓ Spawn point placed%s!~s~ Total: %d", teamText, #currentMapData.spawns), "success", 3000)
-                            placingPoint = false
-                            placingType = nil
-                            selectedTeam = nil
+                                PlaySoundFrontend(-1, "CHECKPOINT_PERFECT", "HUD_MINI_GAME_SOUNDSET", true)
+                                local teamText = selectedTeam and string.format(" (Team %d)", selectedTeam) or ""
+                                ESX.ShowNotification(string.format("~g~✓ Spawn point placed%s!~s~ Total: %d", teamText, #currentMapData.spawns), "success", 3000)
+                                placingPoint = false
+                                placingType = nil
+                                selectedTeam = nil
+                            end
                         end
                     end
                 end
@@ -1238,12 +1364,11 @@ function StartMapEditor()
             
             if currentMapData then
                 if currentMapData.center then
+                    -- Draw center point marker (zone visualization is handled by PolyZone)
                     DrawMarker(1, currentMapData.center.x, currentMapData.center.y, currentMapData.center.z - 0.5, 0.0, 0.0, 0.0, 0, 0.0, 0.0, 1.0, 1.0, 1.0, 0, 255, 0, 50, false, false, 2, false, false, false, false)
                     DrawMarker(28, currentMapData.center.x, currentMapData.center.y, currentMapData.center.z, 0.0, 0.0, 0.0, 0, 0.0, 0.0, 0.8, 0.8, 0.3, 0, 255, 0, 50, false, false, 2, false, false, false, false)
                     DrawText3D(currentMapData.center.x, currentMapData.center.y, currentMapData.center.z + 1.5, "~g~CENTER POINT~s~")
-                    
-                    local radiusSize = currentMapData.radius * 2.0
-                    DrawMarker(28, currentMapData.center.x, currentMapData.center.y, currentMapData.center.z, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, radiusSize, radiusSize, radiusSize, 0, 255, 0, 30, false, true, 2, false, false, false, false)
+                    -- Zone sphere is now handled by PolyZone CircleZone
                 end
 
                 if currentMapData.spawns then
@@ -1338,6 +1463,11 @@ function RemoveMarkerAtLook()
     if closestMarker and closestDist <= checkDistance then
         if markerType == "center" then
             currentMapData.center = nil
+            -- Destroy editor zone when center is removed
+            if editorZone then
+                editorZone:destroy()
+                editorZone = nil
+            end
             ESX.ShowNotification("~r~Center point removed!~s~", "error", 3000)
             PlaySoundFrontend(-1, "CHECKPOINT_MISSED", "HUD_MINI_GAME_SOUNDSET", true)
         elseif markerType == "spawn" and markerIndex then
@@ -1357,6 +1487,13 @@ function StopMapEditor()
     selectedTeam = nil
     StopFreecam()
     currentMapData = nil
+    
+    -- Destroy editor zone
+    if editorZone then
+        editorZone:destroy()
+        editorZone = nil
+    end
+    
     SendNUIMessage({ action = 'hideMenu' })
     SetNuiFocus(false, false)
     CreateThread(function()
@@ -1398,6 +1535,12 @@ function SetMapCenter()
 end
 
 function OpenSpawnTeamMenu()
+    -- Check if center point is set
+    if not currentMapData or not currentMapData.center then
+        ESX.ShowNotification("~r~Error: You must set a center point before placing spawn points!~s~", "error", 4000)
+        return
+    end
+    
     local hasTeamModes = false
     for _, gameMode in ipairs(Config.GameModes) do
         if gameMode.teams and gameMode.teams > 0 then
