@@ -7,305 +7,60 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- Game Mode Selection Menu -->
-    <div id="gamemode-ui" class="paintball-ui hidden">
-        <div class="paintball-container">
-            <div class="paintball-box">
-                <div class="paintball-accent-top"></div>
-                <div class="paintball-content">
-                    <div class="paintball-header">
-                        <h2 class="paintball-title">Select Game Mode</h2>
-                        <button class="paintball-close" id="gamemode-close">×</button>
-                    </div>
-                    <div class="paintball-menu" id="gamemode-menu"></div>
-                </div>
-                <div class="paintball-accent-bottom"></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Map Selection Menu -->
-    <div id="map-ui" class="paintball-ui hidden">
-        <div class="paintball-container">
-            <div class="paintball-box">
-                <div class="paintball-accent-top"></div>
-                <div class="paintball-content">
-                    <div class="paintball-header">
-                        <h2 class="paintball-title">Select Map</h2>
-                        <button class="paintball-close" id="map-close">×</button>
-                    </div>
-                    <div class="paintball-menu" id="map-menu"></div>
-                </div>
-                <div class="paintball-accent-bottom"></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Editor Main Menu -->
-    <div id="editor-main-ui" class="paintball-ui hidden">
-        <div class="paintball-container">
-            <div class="paintball-box">
-                <div class="paintball-accent-top"></div>
-                <div class="paintball-content">
-                    <div class="paintball-header">
-                        <h2 class="paintball-title">Map Editor</h2>
-                        <button class="paintball-close" id="editor-main-close">×</button>
-                    </div>
-                    <div class="paintball-menu" id="editor-main-menu"></div>
-                </div>
-                <div class="paintball-accent-bottom"></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Map Editor Menu -->
-    <div id="editor-ui" class="paintball-ui hidden">
-        <div class="paintball-container">
-            <div class="paintball-box">
-                <div class="paintball-accent-top"></div>
-                <div class="paintball-content">
-                    <div class="paintball-header">
-                        <h2 class="paintball-title">Map Editor</h2>
-                        <button class="paintball-close" id="editor-close">×</button>
-                    </div>
-                    <div class="paintball-menu" id="editor-menu"></div>
-                </div>
-                <div class="paintball-accent-bottom"></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Team Selection Menu (for spawn points) -->
-    <div id="team-ui" class="paintball-ui hidden">
-        <div class="paintball-container">
-            <div class="paintball-box">
-                <div class="paintball-accent-top"></div>
-                <div class="paintball-content">
-                    <div class="paintball-header">
-                        <h2 class="paintball-title">Select Team</h2>
-                        <button class="paintball-close" id="team-close">×</button>
-                    </div>
-                    <div class="paintball-menu" id="team-menu"></div>
-                </div>
-                <div class="paintball-accent-bottom"></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Dialog for map name / radius -->
-    <div id="dialog-ui" class="paintball-ui hidden">
-        <div class="paintball-container">
-            <div class="paintball-box">
-                <div class="paintball-accent-top"></div>
-                <div class="paintball-content">
-                    <div class="paintball-header">
-                        <h2 class="paintball-title" id="dialog-title">Enter Value</h2>
-                        <button class="paintball-close" id="dialog-close">×</button>
-                    </div>
-                    <div class="paintball-dialog">
-                        <div id="dialog-error" class="error-message" style="display: none;"></div>
-                        <input type="text" id="dialog-input" class="dialog-input" placeholder="" autocomplete="off">
-                        <div class="dialog-buttons">
-                            <button class="btn-primary" id="dialog-submit">Submit</button>
-                            <button class="btn-secondary" id="dialog-cancel">Cancel</button>
+    <!-- Menu Template Function -->
+    <script>
+        function createMenuElement(menuId, title) {
+            const menu = document.createElement('div');
+            menu.className = 'paintball-ui hidden';
+            menu.id = `${menuId}-ui`;
+            menu.setAttribute('data-menu-id', menuId);
+            
+            menu.innerHTML = `
+                <div class="paintball-container">
+                    <div class="paintball-box">
+                        <div class="paintball-accent-top"></div>
+                        <div class="paintball-content">
+                            <div class="paintball-header">
+                                <h2 class="paintball-title">${title}</h2>
+                                <button class="paintball-close" type="button" aria-label="Close">×</button>
+                            </div>
+                            <div class="paintball-menu"></div>
                         </div>
+                        <div class="paintball-accent-bottom"></div>
                     </div>
                 </div>
-                <div class="paintball-accent-bottom"></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Main Menu -->
-    <div id="main-ui" class="paintball-ui hidden">
-        <div class="paintball-container">
-            <div class="paintball-box">
-                <div class="paintball-accent-top"></div>
-                <div class="paintball-content">
-                    <div class="paintball-header">
-                        <h2 class="paintball-title">Paintball</h2>
-                        <button class="paintball-close" id="main-close">×</button>
-                    </div>
-                    <div class="paintball-menu" id="main-menu"></div>
-                </div>
-                <div class="paintball-accent-bottom"></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Match Browser -->
-    <div id="browser-ui" class="paintball-ui hidden">
-        <div class="paintball-container">
-            <div class="paintball-box">
-                <div class="paintball-accent-top"></div>
-                <div class="paintball-content">
-                    <div class="paintball-header">
-                        <h2 class="paintball-title">Active Matches</h2>
-                        <button class="paintball-close" id="browser-close">×</button>
-                    </div>
-                    <div class="paintball-menu" id="browser-menu"></div>
-                </div>
-                <div class="paintball-accent-bottom"></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Weapon Selection -->
-    <div id="weapon-ui" class="paintball-ui hidden">
-        <div class="paintball-container">
-            <div class="paintball-box">
-                <div class="paintball-accent-top"></div>
-                <div class="paintball-content">
-                    <div class="paintball-header">
-                        <h2 class="paintball-title">Select Weapon</h2>
-                        <button class="paintball-close" id="weapon-close">×</button>
-                    </div>
-                    <div class="paintball-menu" id="weapon-menu"></div>
-                </div>
-                <div class="paintball-accent-bottom"></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Admin Matches Management -->
-    <div id="admin-matches-ui" class="paintball-ui hidden">
-        <div class="paintball-container">
-            <div class="paintball-box">
-                <div class="paintball-accent-top"></div>
-                <div class="paintball-content">
-                    <div class="paintball-header">
-                        <h2 class="paintball-title">Active Matches (Admin)</h2>
-                        <button class="paintball-close" id="admin-matches-close">×</button>
-                    </div>
-                    <div class="paintball-menu" id="admin-matches-menu"></div>
-                </div>
-                <div class="paintball-accent-bottom"></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Admin Weapon Config -->
-    <div id="weapon-config-ui" class="paintball-ui hidden">
-        <div class="paintball-container">
-            <div class="paintball-box" style="min-width: 600px; max-width: 800px;">
-                <div class="paintball-accent-top"></div>
-                <div class="paintball-content">
-                    <div class="paintball-header">
-                        <h2 class="paintball-title">Weapon Configuration</h2>
-                        <button class="paintball-close" id="weapon-config-close">×</button>
-                    </div>
-                    <div class="paintball-menu" id="weapon-config-menu"></div>
-                </div>
-                <div class="paintball-accent-bottom"></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- PIN Dialog -->
-    <div id="pin-ui" class="paintball-ui hidden">
-        <div class="paintball-container">
-            <div class="paintball-box">
-                <div class="paintball-accent-top"></div>
-                <div class="paintball-content">
-                    <div class="paintball-header">
-                        <h2 class="paintball-title">Enter PIN</h2>
-                        <button class="paintball-close" id="pin-close">×</button>
-                    </div>
-                    <div class="paintball-dialog">
-                        <div id="pin-error" class="error-message" style="display: none;"></div>
-                        <input type="text" id="pin-input" class="dialog-input" placeholder="Enter match PIN" autocomplete="off" maxlength="6">
-                        <div class="dialog-buttons">
-                            <button class="btn-primary" id="pin-submit">Join</button>
-                            <button class="btn-secondary" id="pin-cancel">Cancel</button>
+            `;
+            
+            return menu;
+        }
+        
+        function createDialogElement(dialogId, title) {
+            const dialog = document.createElement('div');
+            dialog.className = 'paintball-ui hidden';
+            dialog.id = `${dialogId}-ui`;
+            dialog.setAttribute('data-dialog-id', dialogId);
+            
+            dialog.innerHTML = `
+                <div class="paintball-container">
+                    <div class="paintball-box">
+                        <div class="paintball-accent-top"></div>
+                        <div class="paintball-content">
+                            <div class="paintball-header">
+                                <h2 class="paintball-title">${title}</h2>
+                                <button class="paintball-close" type="button" aria-label="Close">×</button>
+                            </div>
+                            <div class="paintball-dialog">
+                                <div class="error-message" style="display: none;"></div>
+                            </div>
                         </div>
+                        <div class="paintball-accent-bottom"></div>
                     </div>
                 </div>
-                <div class="paintball-accent-bottom"></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Category Selection Dialog -->
-    <div id="category-select-ui" class="paintball-ui hidden">
-        <div class="paintball-container">
-            <div class="paintball-box">
-                <div class="paintball-accent-top"></div>
-                <div class="paintball-content">
-                    <div class="paintball-header">
-                        <h2 class="paintball-title" id="category-select-title">Select Category</h2>
-                        <button class="paintball-close" id="category-select-close">×</button>
-                    </div>
-                    <div class="paintball-menu" id="category-select-menu"></div>
-                </div>
-                <div class="paintball-accent-bottom"></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Weapon Selection Dialog -->
-    <div id="weapon-select-ui" class="paintball-ui hidden">
-        <div class="paintball-container">
-            <div class="paintball-box" style="min-width: 500px; max-width: 600px;">
-                <div class="paintball-accent-top"></div>
-                <div class="paintball-content">
-                    <div class="paintball-header">
-                        <h2 class="paintball-title" id="weapon-select-title">Add Weapon</h2>
-                        <button class="paintball-close" id="weapon-select-close">×</button>
-                    </div>
-                    <div class="paintball-dialog" id="weapon-select-content">
-                        <div id="weapon-select-error" class="error-message" style="display: none;"></div>
-                        <!-- Content will be dynamically generated -->
-                    </div>
-                </div>
-                <div class="paintball-accent-bottom"></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Confirmation Dialog UI -->
-    <div id="confirm-ui" class="paintball-ui hidden">
-        <div class="paintball-container">
-            <div class="paintball-box" style="min-width: 400px; max-width: 500px;">
-                <div class="paintball-accent-top" style="background: linear-gradient(90deg, rgba(255, 184, 0, 0.9) 0%, rgba(255, 184, 0, 0.9) 50%, rgba(255, 184, 0, 0.9) 100%);"></div>
-                <div class="paintball-content">
-                    <div class="paintball-header">
-                        <h2 class="paintball-title" style="color: #ffb800;">Confirm</h2>
-                        <button class="paintball-close" id="confirm-close">×</button>
-                    </div>
-                    <div class="paintball-dialog">
-                        <div id="confirm-message" style="color: #FFFFFF; font-size: 14px; line-height: 1.6; margin-bottom: 16px; text-align: center;"></div>
-                        <div class="dialog-buttons">
-                            <button class="btn-primary" id="confirm-yes" style="flex: 1; margin-right: 8px;">Yes</button>
-                            <button class="btn-secondary" id="confirm-no" style="flex: 1;">No</button>
-                        </div>
-                    </div>
-                </div>
-                <div class="paintball-accent-bottom" style="background: rgba(255, 184, 0, 0.3);"></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Error Message UI -->
-    <div id="error-ui" class="paintball-ui hidden">
-        <div class="paintball-container">
-            <div class="paintball-box" style="min-width: 400px; max-width: 500px;">
-                <div class="paintball-accent-top" style="background: linear-gradient(90deg, rgba(255, 68, 68, 0.9) 0%, rgba(255, 68, 68, 0.9) 50%, rgba(255, 68, 68, 0.9) 100%);"></div>
-                <div class="paintball-content">
-                    <div class="paintball-header">
-                        <h2 class="paintball-title" style="color: #ff4444;">Error</h2>
-                        <button class="paintball-close" id="error-close">×</button>
-                    </div>
-                    <div class="paintball-dialog">
-                        <div id="error-message" style="color: #FFFFFF; font-size: 14px; line-height: 1.6; margin-bottom: 16px; text-align: center;"></div>
-                        <div class="dialog-buttons">
-                            <button class="btn-primary" id="error-ok" style="width: 100%;">OK</button>
-                        </div>
-                    </div>
-                </div>
-                <div class="paintball-accent-bottom" style="background: rgba(255, 68, 68, 0.3);"></div>
-            </div>
-        </div>
-    </div>
+            `;
+            
+            return dialog;
+        }
+    </script>
 
     <!-- Press E UI -->
     <div id="press-e-ui" class="press-e-ui hidden">
@@ -323,4 +78,3 @@
     <script src="script.js"></script>
 </body>
 </html>
-

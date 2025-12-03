@@ -1,7 +1,66 @@
-let currentMenu = null;
-let pressEUIVisible = false;
+/**
+ * Paintball UI - Professional Refactored Version
+ * Organized, maintainable, and performant
+ */
 
-function parseColorCodes(text) {
+// ============================================================================
+// CONFIGURATION & CONSTANTS
+// ============================================================================
+const CONFIG = {
+    MENU_ANIMATION_DELAY: 200,
+    ERROR_DISPLAY_DURATION: 5000,
+    INPUT_FOCUS_DELAY: 100,
+    NUI_READY_RETRY_DELAY: 500,
+};
+
+const MENU_IDS = {
+    GAMEMODE: 'gamemode',
+    MAP: 'map',
+    EDITOR_MAIN: 'editor-main',
+    EDITOR: 'editor',
+    TEAM: 'team',
+    DIALOG: 'dialog',
+    MAIN: 'main',
+    BROWSER: 'browser',
+    WEAPON: 'weapon',
+    WEAPON_CONFIG: 'weapon-config',
+    PIN: 'pin',
+    CATEGORY_SELECT: 'category-select',
+    WEAPON_SELECT: 'weapon-select',
+    ERROR: 'error',
+    CONFIRM: 'confirm',
+    ADMIN_MATCHES: 'admin-matches',
+};
+
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
+const Utils = {
+    /**
+     * Get resource name for NUI callbacks
+     */
+    getResourceName() {
+        return typeof GetParentResourceName === 'function' ? GetParentResourceName() : 'envy_paintball';
+    },
+
+    /**
+     * Send NUI callback
+     */
+    sendNuiCallback(event, data = {}) {
+        return fetch(`https://${this.getResourceName()}/${event}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        }).catch(error => {
+            console.error(`NUI callback error (${event}):`, error);
+            return { ok: false };
+        });
+    },
+
+    /**
+     * Parse GTA color codes to HTML
+     */
+    parseColorCodes(text) {
     if (!text) return '';
     
     const colorMap = {
@@ -16,7 +75,7 @@ function parseColorCodes(text) {
         '~o~': '<span style="color: #ff8844;">',
         '~eb~': '<span style="color: #0987ff;">',
         '~s~': '</span>',
-        '~w~': '</span>'
+            '~w~': '</span>',
     };
     
     let htmlText = text;
@@ -25,824 +84,636 @@ function parseColorCodes(text) {
     }
     
     return htmlText;
-}
+    },
 
-function updatePressEPosition(ui, x, y) {
-    ui.style.left = x + 'px';
-    ui.style.top = y + 'px';
-}
-
-function showMenu(menuId) {
-    const menu = document.getElementById(menuId);
-    if (!menu) return;
-    
-    menu.classList.remove('hidden');
-    menu.classList.add('active');
-    currentMenu = menuId;
-    
-    setTimeout(() => {
-        const input = document.getElementById('dialog-input');
-        if (input && menuId === 'dialog-ui') {
-            input.focus();
-        }
-    }, 100);
-}
-
-function hideMenu(menuId) {
-    const menu = document.getElementById(menuId);
-    if (!menu) return;
-    
-    // Don't close weapon-select-ui if it has an error open
-    if (menuId === 'weapon-select-ui' && menu.getAttribute('data-error-open') === 'true') {
-        return;
-    }
-    
-    menu.classList.remove('active');
-    setTimeout(() => {
-        menu.classList.add('hidden');
-    }, 200);
-    
-    if (currentMenu === menuId) {
-        currentMenu = null;
-    }
-}
-
-function hideAllMenus() {
-    hideMenu('gamemode-ui');
-    hideMenu('map-ui');
-    hideMenu('editor-main-ui');
-    hideMenu('editor-ui');
-    hideMenu('team-ui');
-    hideMenu('dialog-ui');
-    hideMenu('main-ui');
-    hideMenu('browser-ui');
-    hideMenu('weapon-ui');
-    hideMenu('weapon-config-ui');
-    hideMenu('pin-ui');
-    hideMenu('category-select-ui');
-    hideMenu('weapon-select-ui');
-    hideMenu('error-ui');
-    hideMenu('confirm-ui');
-    hideMenu('admin-matches-ui');
-    currentMenu = null;
-}
-
-function showError(message) {
-    // Show inline error in the currently open dialog (best UX practice)
-    let errorEl = null;
-    let shouldShowWeaponSelect = false;
-    
-    // Check if this is a weapon-related error
-    const isWeaponError = message && (
-        message.toLowerCase().includes('weapon') || 
-        message.toLowerCase().includes('category')
-    );
-    
-    // Check which dialog is currently open
-    if (document.getElementById('dialog-ui')?.classList.contains('active')) {
-        errorEl = document.getElementById('dialog-error');
-    } else if (document.getElementById('pin-ui')?.classList.contains('active')) {
-        errorEl = document.getElementById('pin-error');
-    } else if (document.getElementById('weapon-select-ui')?.classList.contains('active')) {
-        errorEl = document.getElementById('weapon-select-error');
-    } else if (document.getElementById('category-select-ui')?.classList.contains('active')) {
-        // If category select is open, show error in weapon-select-ui (reopen it)
-        errorEl = document.getElementById('weapon-select-error');
-        shouldShowWeaponSelect = true;
-    } else if (isWeaponError) {
-        // If it's a weapon error and no dialog is open, show it in weapon-select-ui
-        errorEl = document.getElementById('weapon-select-error');
-        shouldShowWeaponSelect = true;
-    }
-    
-    // If weapon-select-ui should be shown, open it first and ensure it stays open
-    if (shouldShowWeaponSelect && errorEl) {
-        const weaponSelectUI = document.getElementById('weapon-select-ui');
-        if (weaponSelectUI) {
-            showMenu('weapon-select-ui');
-            // Prevent it from being closed by other events
-            weaponSelectUI.setAttribute('data-error-open', 'true');
-        }
-    }
-    
-    if (errorEl) {
-        // Show inline error in the current dialog
-        errorEl.textContent = message;
-        errorEl.style.display = 'block';
-        
-        // Keep the error flag set while error is visible
-        // This prevents the window from closing
-        // Auto-hide after 5 seconds
-        setTimeout(() => {
-            errorEl.textContent = '';
-            errorEl.style.display = 'none';
-            // Only remove the flag if it's a weapon error and user can now close manually
-            // For weapon errors, keep the flag a bit longer to ensure window stays open
-            if (isWeaponError) {
-                setTimeout(() => {
-                    const weaponSelectUI = document.getElementById('weapon-select-ui');
-                    if (weaponSelectUI) {
-                        weaponSelectUI.removeAttribute('data-error-open');
-                    }
-                }, 1000); // Remove flag 1 second after error hides
-            } else {
-                const weaponSelectUI = document.getElementById('weapon-select-ui');
-                if (weaponSelectUI) {
-                    weaponSelectUI.removeAttribute('data-error-open');
-                }
-            }
-        }, 5000);
-    } else {
-        // Fallback to popup if no dialog is open
-        const errorUI = document.getElementById('error-ui');
-        const errorMessage = document.getElementById('error-message');
-        
-        if (errorUI && errorMessage) {
-            errorMessage.textContent = message;
-            showMenu('error-ui');
-            
-            const okBtn = document.getElementById('error-ok');
-            const closeBtn = document.getElementById('error-close');
-            
-            const closeHandler = () => {
-                hideMenu('error-ui');
-                okBtn.removeEventListener('click', closeHandler);
-                closeBtn.removeEventListener('click', closeHandler);
+    /**
+     * Debounce function
+     */
+    debounce(func, wait) {
+        let timeout;
+        return function executedFunction(...args) {
+            const later = () => {
+                clearTimeout(timeout);
+                func(...args);
             };
-            
-            okBtn.addEventListener('click', closeHandler);
-            closeBtn.addEventListener('click', closeHandler);
-        }
-    }
-}
+            clearTimeout(timeout);
+            timeout = setTimeout(later, wait);
+        };
+    },
+};
 
-function createMenuItem(title, description, onClick) {
-    const item = document.createElement('div');
-    item.className = 'menu-item';
-    
-    const titleEl = document.createElement('div');
-    titleEl.className = 'menu-item-title';
-    titleEl.textContent = title;
-    
-    const descEl = document.createElement('div');
-    descEl.className = 'menu-item-description';
-    descEl.textContent = description;
-    
-    item.appendChild(titleEl);
-    if (description) {
-        item.appendChild(descEl);
-    }
-    
-    item.addEventListener('click', onClick);
-    
-    return item;
-}
+// ============================================================================
+// MENU MANAGEMENT SYSTEM
+// ============================================================================
+const MenuManager = {
+    currentMenu: null,
+    menus: new Map(),
+    templates: new Map(),
+    focusReleaseScheduled: false, // Prevent multiple focus release calls
+    isNavigating: false, // Track when we're navigating between menus (don't release focus)
 
-function displayGameModes(gameModes) {
-    const menu = document.getElementById('gamemode-menu');
-    menu.innerHTML = '';
-    
-    gameModes.forEach(mode => {
-        const item = createMenuItem(
-            mode.name,
-            `Players: ${mode.minPlayers}-${mode.maxPlayers}`,
-            () => {
-                fetch(`https://${GetParentResourceName()}/selectGameMode`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ gameModeId: mode.id })
-                });
+    /**
+     * Initialize menu system
+     */
+    init() {
+        this.setupTemplates();
+        this.createMenus();
+        this.attachEventListeners();
+    },
+
+    /**
+     * Setup HTML templates
+     */
+    setupTemplates() {
+        // Templates are created via functions in HTML
+    },
+
+    /**
+     * Create all menu instances
+     */
+    createMenus() {
+        // Create menu instances using helper functions from HTML
+        const menuConfigs = [
+            { id: MENU_IDS.GAMEMODE, title: 'Select Game Mode', isDialog: false },
+            { id: MENU_IDS.MAP, title: 'Select Map', isDialog: false },
+            { id: MENU_IDS.EDITOR_MAIN, title: 'Map Editor', isDialog: false },
+            { id: MENU_IDS.EDITOR, title: 'Map Editor', isDialog: false },
+            { id: MENU_IDS.TEAM, title: 'Select Team', isDialog: false },
+            { id: MENU_IDS.MAIN, title: 'Paintball', isDialog: false },
+            { id: MENU_IDS.BROWSER, title: 'Active Matches', isDialog: false },
+            { id: MENU_IDS.WEAPON, title: 'Select Weapon', isDialog: false },
+            { id: MENU_IDS.WEAPON_CONFIG, title: 'Weapon Configuration', isDialog: false },
+            { id: MENU_IDS.ADMIN_MATCHES, title: 'Active Matches (Admin)', isDialog: false },
+            { id: MENU_IDS.DIALOG, title: 'Enter Value', isDialog: true },
+            { id: MENU_IDS.PIN, title: 'Enter PIN', isDialog: true },
+            { id: MENU_IDS.CATEGORY_SELECT, title: 'Select Category', isDialog: false },
+            { id: MENU_IDS.WEAPON_SELECT, title: 'Add Weapon', isDialog: true },
+            { id: MENU_IDS.ERROR, title: 'Error', isDialog: true },
+            { id: MENU_IDS.CONFIRM, title: 'Confirm', isDialog: true },
+        ];
+        
+        menuConfigs.forEach(config => {
+            let menu;
+            if (typeof createMenuElement === 'function' && !config.isDialog) {
+                menu = createMenuElement(config.id, config.title);
+            } else if (typeof createDialogElement === 'function' && config.isDialog) {
+                menu = createDialogElement(config.id, config.title);
+            } else {
+                // Fallback: create manually
+                menu = document.createElement('div');
+                menu.className = 'paintball-ui hidden';
+                menu.id = `${config.id}-ui`;
+                menu.setAttribute(config.isDialog ? 'data-dialog-id' : 'data-menu-id', config.id);
+                menu.innerHTML = `
+                    <div class="paintball-container">
+                        <div class="paintball-box">
+                            <div class="paintball-accent-top"></div>
+                            <div class="paintball-content">
+                                <div class="paintball-header">
+                                    <h2 class="paintball-title">${config.title}</h2>
+                                    <button class="paintball-close" type="button" aria-label="Close">×</button>
+                                </div>
+                                <div class="${config.isDialog ? 'paintball-dialog' : 'paintball-menu'}">
+                                    ${config.isDialog ? '<div class="error-message" style="display: none;"></div>' : ''}
+                                </div>
+                            </div>
+                            <div class="paintball-accent-bottom"></div>
+                        </div>
+                    </div>
+                `;
             }
-        );
-        menu.appendChild(item);
-    });
-    
-    showMenu('gamemode-ui');
-}
-
-function displayMaps(maps, forEditing, forDeleting) {
-    const menu = document.getElementById('map-menu');
-    menu.innerHTML = '';
-    
-    if (!maps || maps.length === 0) {
-        const item = document.createElement('div');
-        item.className = 'menu-item';
-        item.style.cursor = 'default';
-        item.style.opacity = '0.6';
-        const titleEl = document.createElement('div');
-        titleEl.className = 'menu-item-title';
-        titleEl.textContent = 'No maps available';
-        const descEl = document.createElement('div');
-        descEl.className = 'menu-item-description';
-        descEl.textContent = forEditing ? 'Please create maps using the map editor' : 'Please create maps using the map editor';
-        item.appendChild(titleEl);
-        item.appendChild(descEl);
-        menu.appendChild(item);
-    } else {
-        maps.forEach(map => {
-            const item = createMenuItem(
-                map.name,
-                `Spawns: ${map.spawns.length} | Radius: ${map.radius.toFixed(1)}m`,
-                () => {
-                    if (forDeleting) {
-                        // Show confirmation dialog for deletion
-                        showConfirmDialog(
-                            `Are you sure you want to delete map "${map.name}"?\n\nThis action cannot be undone.`,
-                            () => {
-                                // Yes - delete the map
-                                hideMenu('confirm-ui');
-                                fetch(`https://${GetParentResourceName()}/deleteMap`, {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ mapId: map.id })
-                                });
-                            },
-                            () => {
-                                // No - do nothing
-                            }
-                        );
-                    } else if (forEditing) {
-                        // Load map for editing
-                        fetch(`https://${GetParentResourceName()}/loadMapForEdit`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ mapId: map.id })
-                        });
-                    } else {
-                        // Select map for match creation
-                        fetch(`https://${GetParentResourceName()}/selectMap`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ mapId: map.id })
-                        });
+            
+            if (menu) {
+                const titleEl = menu.querySelector('.paintball-title');
+                const closeBtn = menu.querySelector('.paintball-close');
+                const contentEl = menu.querySelector(config.isDialog ? '.paintball-dialog' : '.paintball-menu');
+                const box = menu.querySelector('.paintball-box');
+                
+                // Special width for weapon-config and weapon-select
+                if (config.id === MENU_IDS.WEAPON_CONFIG) {
+                    if (box) {
+                        box.style.minWidth = '600px';
+                        box.style.maxWidth = '800px';
+                    }
+                } else if (config.id === MENU_IDS.WEAPON_SELECT) {
+                    if (box) {
+                        box.style.minWidth = '500px';
+                        box.style.maxWidth = '600px';
+                    }
+                } else if (config.id === MENU_IDS.CONFIRM || config.id === MENU_IDS.ERROR) {
+                    if (box) {
+                        box.style.minWidth = '400px';
+                        box.style.maxWidth = '500px';
                     }
                 }
-            );
-            menu.appendChild(item);
+                
+                // Special styling for confirm/error dialogs
+                if (config.id === MENU_IDS.CONFIRM) {
+                    const accentTop = menu.querySelector('.paintball-accent-top');
+                    const accentBottom = menu.querySelector('.paintball-accent-bottom');
+                    if (accentTop) accentTop.style.background = 'linear-gradient(90deg, rgba(255, 184, 0, 0.9) 0%, rgba(255, 184, 0, 0.9) 50%, rgba(255, 184, 0, 0.9) 100%)';
+                    if (accentBottom) accentBottom.style.background = 'rgba(255, 184, 0, 0.3)';
+                    if (titleEl) titleEl.style.color = '#ffb800';
+                } else if (config.id === MENU_IDS.ERROR) {
+                    const accentTop = menu.querySelector('.paintball-accent-top');
+                    const accentBottom = menu.querySelector('.paintball-accent-bottom');
+                    if (accentTop) accentTop.style.background = 'linear-gradient(90deg, rgba(255, 68, 68, 0.9) 0%, rgba(255, 68, 68, 0.9) 50%, rgba(255, 68, 68, 0.9) 100%)';
+                    if (accentBottom) accentBottom.style.background = 'rgba(255, 68, 68, 0.3)';
+                    if (titleEl) titleEl.style.color = '#ff4444';
+                }
+                
+                // Attach close handler
+                if (closeBtn) {
+                    closeBtn.addEventListener('click', () => this.close(config.id));
+                }
+                
+                // Store references
+                menu._titleEl = titleEl;
+                menu._closeBtn = closeBtn;
+                menu._contentEl = contentEl;
+                
+                this.menus.set(config.id, menu);
+                document.body.appendChild(menu);
+            }
         });
-    }
-    
-    showMenu('map-ui');
-}
+    },
 
-function displayAdminMatches(matches) {
-    const menu = document.getElementById('admin-matches-menu');
-    menu.innerHTML = '';
+    /**
+     * Get menu title by ID
+     */
+    getMenuTitle(menuId) {
+        const titles = {
+            [MENU_IDS.GAMEMODE]: 'Select Game Mode',
+            [MENU_IDS.MAP]: 'Select Map',
+            [MENU_IDS.EDITOR_MAIN]: 'Map Editor',
+            [MENU_IDS.EDITOR]: 'Map Editor',
+            [MENU_IDS.TEAM]: 'Select Team',
+            [MENU_IDS.DIALOG]: 'Enter Value',
+            [MENU_IDS.MAIN]: 'Paintball',
+            [MENU_IDS.BROWSER]: 'Active Matches',
+            [MENU_IDS.WEAPON]: 'Select Weapon',
+            [MENU_IDS.WEAPON_CONFIG]: 'Weapon Configuration',
+            [MENU_IDS.PIN]: 'Enter PIN',
+            [MENU_IDS.CATEGORY_SELECT]: 'Select Category',
+            [MENU_IDS.WEAPON_SELECT]: 'Add Weapon',
+            [MENU_IDS.ERROR]: 'Error',
+            [MENU_IDS.CONFIRM]: 'Confirm',
+            [MENU_IDS.ADMIN_MATCHES]: 'Active Matches (Admin)',
+        };
+        return titles[menuId] || 'Menu';
+    },
+
+    /**
+     * Show a menu
+     * @param {string} menuId - The menu ID to show
+     * @param {Object} options - Options for showing the menu
+     * @param {string} options.title - Optional title override
+     * @param {boolean} options.keepOpen - If true, don't close other menus (for dialogs that should stack)
+     */
+    show(menuId, options = {}) {
+        const menu = this.menus.get(menuId);
+        if (!menu) return;
+
+        // Define which menus can stack (dialogs that should appear over other menus)
+        // These are typically confirmation dialogs, error messages, or input dialogs
+        const stackableMenus = [
+            MENU_IDS.CONFIRM,
+            MENU_IDS.ERROR,
+            MENU_IDS.DIALOG,
+            MENU_IDS.PIN,
+            MENU_IDS.CATEGORY_SELECT,
+            MENU_IDS.WEAPON_SELECT,
+        ];
+
+        // Close other menus unless this is a stackable menu or explicitly told to keep open
+        const shouldCloseOthers = !options.keepOpen && !stackableMenus.includes(menuId);
+        
+        if (shouldCloseOthers) {
+            // Close all other menus (including stackable ones) when opening a regular menu
+            // Don't check focus release - we're opening a new menu, so focus should stay
+            this.menus.forEach((otherMenu, otherMenuId) => {
+                if (otherMenuId !== menuId && otherMenu.classList.contains('active')) {
+                    // Check for special error flag on weapon-select
+                    if (otherMenuId === MENU_IDS.WEAPON_SELECT && otherMenu.getAttribute('data-error-open') === 'true') {
+                        // Don't close if error is being displayed
+                        return;
+                    }
+                    this.hide(otherMenuId, { checkFocusRelease: false });
+                }
+            });
+        } else if (stackableMenus.includes(menuId)) {
+            // If opening a stackable menu, only close other stackable menus (not regular menus)
+            // Don't check focus release - we're opening a new menu, so focus should stay
+            this.menus.forEach((otherMenu, otherMenuId) => {
+                if (otherMenuId !== menuId && 
+                    otherMenu.classList.contains('active') && 
+                    stackableMenus.includes(otherMenuId)) {
+                    // Don't close weapon-select if it has an error flag
+                    if (otherMenuId === MENU_IDS.WEAPON_SELECT && otherMenu.getAttribute('data-error-open') === 'true') {
+                        return;
+                    }
+                    this.hide(otherMenuId, { checkFocusRelease: false });
+                }
+            });
+        }
+
+        // Update title if provided
+        if (options.title && menu._titleEl) {
+            menu._titleEl.textContent = options.title;
+        }
+
+        // Reset focus release flag when showing a menu (menu is being opened)
+        this.focusReleaseScheduled = false;
+        // Clear navigation flag when menu is shown (navigation complete)
+        this.isNavigating = false;
+
+        menu.classList.remove('hidden');
+        menu.classList.add('active');
+        this.currentMenu = menuId;
+
+        // Auto-focus input if dialog
+        if (menuId === MENU_IDS.DIALOG || menuId === MENU_IDS.PIN) {
+            setTimeout(() => {
+                const input = menu.querySelector('input');
+                if (input) input.focus();
+            }, CONFIG.INPUT_FOCUS_DELAY);
+        }
+    },
+
+    /**
+     * Hide a menu
+     * @param {string} menuId - The menu ID to hide
+     * @param {Object} options - Options for hiding
+     * @param {boolean} options.checkFocusRelease - If true, check and release focus if all menus closed (default: true)
+     */
+    hide(menuId, options = {}) {
+        const menu = this.menus.get(menuId);
+        if (!menu) return;
+
+        // Check for error flag (prevents closing during error display)
+        if (menuId === MENU_IDS.WEAPON_SELECT && menu.getAttribute('data-error-open') === 'true') {
+            return;
+        }
+
+        const shouldCheckFocus = options.checkFocusRelease !== false; // Default to true
+
+        menu.classList.remove('active');
+        
+        if (this.currentMenu === menuId) {
+            this.currentMenu = null;
+        }
+        
+        // Check immediately if all menus are closed (before animation)
+        const allClosed = shouldCheckFocus && this.areAllMenusClosed();
+        
+        setTimeout(() => {
+            menu.classList.add('hidden');
+            
+            // Check again after animation completes, but only if focus wasn't already released
+            if (shouldCheckFocus && !this.focusReleaseScheduled && this.areAllMenusClosed()) {
+                this.releaseFocus();
+            }
+        }, CONFIG.MENU_ANIMATION_DELAY);
+        
+        // If all menus are now closed, release focus immediately
+        if (allClosed && !this.focusReleaseScheduled) {
+            this.releaseFocus();
+        }
+    },
     
-    if (!matches || matches.length === 0) {
+    /**
+     * Check if all menus are closed
+     */
+    areAllMenusClosed() {
+        let hasOpenMenu = false;
+        this.menus.forEach((menu, menuId) => {
+            // Check both 'active' class and currentMenu state
+            if (menu.classList.contains('active')) {
+                hasOpenMenu = true;
+            }
+        });
+        return !hasOpenMenu && this.currentMenu === null;
+    },
+    
+    /**
+     * Release NUI focus (cursor)
+     */
+    releaseFocus() {
+        // Don't release focus if we're navigating between menus
+        if (this.isNavigating) {
+            return;
+        }
+        
+        if (this.focusReleaseScheduled) {
+            return; // Already scheduled
+        }
+        
+        this.focusReleaseScheduled = true;
+        Utils.sendNuiCallback('closeMenu', { menu: 'all' });
+        
+        // Reset flag after a short delay to allow for future releases
+        setTimeout(() => {
+            this.focusReleaseScheduled = false;
+        }, 100);
+    },
+
+    /**
+     * Close menu and notify client
+     */
+    close(menuId) {
+        // Explicit close (via close button) - clear navigation flag and release focus
+        this.isNavigating = false;
+        this.hide(menuId);
+        Utils.sendNuiCallback('closeMenu', { menu: menuId });
+    },
+
+    /**
+     * Hide all menus
+     * @param {boolean} force - If true, force close even menus with error flags
+     */
+    hideAll(force = false) {
+        // Explicit close all - clear navigation flag
+        this.isNavigating = false;
+        
+        this.menus.forEach((menu, menuId) => {
+            // Check for error flag unless forcing
+            if (force || menuId !== MENU_IDS.WEAPON_SELECT || menu.getAttribute('data-error-open') !== 'true') {
+                // Remove active class immediately
+                menu.classList.remove('active');
+            }
+        });
+        this.currentMenu = null;
+        
+        // Release cursor immediately when hiding all menus
+        this.releaseFocus();
+        
+        // Complete the hide animation after focus is released
+        setTimeout(() => {
+            this.menus.forEach((menu, menuId) => {
+                if (force || menuId !== MENU_IDS.WEAPON_SELECT || menu.getAttribute('data-error-open') !== 'true') {
+                    menu.classList.add('hidden');
+                }
+            });
+        }, CONFIG.MENU_ANIMATION_DELAY);
+    },
+
+    /**
+     * Get menu element
+     */
+    get(menuId) {
+        return this.menus.get(menuId);
+    },
+
+    /**
+     * Get menu content element
+     */
+    getContent(menuId) {
+        const menu = this.menus.get(menuId);
+        return menu?._contentEl || menu?.querySelector('.paintball-menu') || menu?.querySelector('.paintball-dialog');
+    },
+
+    /**
+     * Attach global event listeners
+     */
+    attachEventListeners() {
+        // Escape key handler
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && this.currentMenu) {
+                // Escape key - explicit close, clear navigation flag
+                this.isNavigating = false;
+                this.hideAll();
+                Utils.sendNuiCallback('closeMenu', { menu: 'all' });
+            }
+        });
+    },
+};
+
+// ============================================================================
+// UI COMPONENTS
+// ============================================================================
+const Components = {
+    /**
+     * Create a menu item
+     */
+    createMenuItem(title, description, onClick, options = {}) {
         const item = document.createElement('div');
         item.className = 'menu-item';
-        item.style.cursor = 'default';
-        item.style.opacity = '0.6';
+        
+        if (options.disabled) {
+            item.style.cursor = 'not-allowed';
+            item.style.opacity = '0.6';
+            item.style.filter = 'grayscale(100%)';
+        }
+        
+        if (options.style) {
+            Object.assign(item.style, options.style);
+        }
+        
         const titleEl = document.createElement('div');
         titleEl.className = 'menu-item-title';
-        titleEl.textContent = 'No active matches';
-        const descEl = document.createElement('div');
-        descEl.className = 'menu-item-description';
-        descEl.textContent = 'There are currently no active paintball matches';
+    titleEl.textContent = title;
+        
         item.appendChild(titleEl);
-        item.appendChild(descEl);
-        menu.appendChild(item);
-    } else {
-        matches.forEach(match => {
-            const statusColor = match.status === 'active' ? '#00ff00' : '#ffff00';
-            const statusText = match.status === 'active' ? 'Active' : 'Waiting';
-            
-            const item = createMenuItem(
-                `${match.gameMode} - ${match.map}`,
-                `Status: ${statusText} | Players: ${match.players}/${match.maxPlayers} | Bucket: ${match.bucket}`,
+        
+        if (description) {
+            const descEl = document.createElement('div');
+            descEl.className = 'menu-item-description';
+            descEl.textContent = description;
+            item.appendChild(descEl);
+        }
+        
+        if (onClick && !options.disabled) {
+            item.addEventListener('click', onClick);
+        }
+        
+        return item;
+    },
+
+    /**
+     * Create a button
+     */
+    createButton(text, onClick, variant = 'primary', options = {}) {
+        const btn = document.createElement('button');
+        btn.className = variant === 'primary' ? 'btn-primary' : 'btn-secondary';
+        btn.textContent = text;
+        
+        if (options.style) {
+            Object.assign(btn.style, options.style);
+        }
+        
+        if (onClick) {
+            btn.addEventListener('click', onClick);
+        }
+        
+        return btn;
+    },
+
+    /**
+     * Create an input field
+     */
+    createInput(placeholder, options = {}) {
+        const input = document.createElement('input');
+        input.type = options.type || 'text';
+        input.className = 'dialog-input';
+        input.placeholder = placeholder;
+        
+        if (options.value) input.value = options.value;
+        if (options.maxLength) input.maxLength = options.maxLength;
+        if (options.autocomplete !== undefined) input.autocomplete = options.autocomplete ? 'on' : 'off';
+        
+        if (options.style) {
+            Object.assign(input.style, options.style);
+        }
+        
+        return input;
+    },
+
+    /**
+     * Show error message
+     */
+    showError(element, message) {
+        if (!element) return;
+        
+        element.textContent = message;
+        element.style.display = 'block';
+        
+        setTimeout(() => {
+            element.textContent = '';
+            element.style.display = 'none';
+        }, CONFIG.ERROR_DISPLAY_DURATION);
+    },
+};
+
+// ============================================================================
+// PRESS E UI MANAGER
+// ============================================================================
+const PressEUIManager = {
+    element: null,
+    textElement: null,
+    visible: false,
+
+    init() {
+        this.element = document.getElementById('press-e-ui');
+        this.textElement = document.getElementById('press-e-text');
+    },
+
+    show(x, y, text, opacity = 1) {
+        if (!this.element || !this.textElement) return;
+        
+        if (text) {
+            this.textElement.innerHTML = Utils.parseColorCodes(text);
+        }
+        
+        if (x !== undefined && y !== undefined) {
+            this.element.style.left = `${x}px`;
+            this.element.style.top = `${y}px`;
+        }
+        
+        this.element.style.opacity = opacity;
+        
+        if (!this.visible) {
+            this.element.classList.remove('hidden');
+            this.visible = true;
+        }
+    },
+
+    hide() {
+        if (this.element && this.visible) {
+            this.element.classList.add('hidden');
+            this.visible = false;
+        }
+    },
+};
+
+// ============================================================================
+// MENU DISPLAY HANDLERS
+// ============================================================================
+const MenuHandlers = {
+    /**
+     * Display game modes
+     */
+    displayGameModes(gameModes) {
+        const content = MenuManager.getContent(MENU_IDS.GAMEMODE);
+        if (!content) return;
+        
+        content.innerHTML = '';
+        
+        gameModes.forEach(mode => {
+            const item = Components.createMenuItem(
+                mode.name,
+                `Players: ${mode.minPlayers}-${mode.maxPlayers}`,
                 () => {
-                    // Show confirmation dialog
-                    showConfirmDialog(
-                        `Are you sure you want to close this match?\n\nGame Mode: ${match.gameMode}\nMap: ${match.map}\nPlayers: ${match.players}/${match.maxPlayers}`,
-                        () => {
-                            // Yes - close the match
-                            fetch(`https://${GetParentResourceName()}/adminCloseMatch`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ matchId: match.id })
-                            });
-                        },
-                        () => {
-                            // No - do nothing
-                        }
-                    );
+                    // Navigating to map selection - set navigation flag
+                    MenuManager.isNavigating = true;
+                    MenuManager.hide(MENU_IDS.GAMEMODE, { checkFocusRelease: false });
+                    Utils.sendNuiCallback('selectGameMode', { gameModeId: mode.id });
                 }
             );
-            
-            // Style based on status
-            const statusSpan = document.createElement('span');
-            statusSpan.textContent = `[${statusText}]`;
-            statusSpan.style.color = statusColor;
-            statusSpan.style.marginLeft = '8px';
-            
-            const titleEl = item.querySelector('.menu-item-title');
-            if (titleEl) {
-                titleEl.appendChild(statusSpan);
-            }
-            
-            menu.appendChild(item);
+            content.appendChild(item);
         });
-    }
-    
-    showMenu('admin-matches-ui');
-}
+        
+        MenuManager.show(MENU_IDS.GAMEMODE);
+    },
 
-function displayEditorMainMenu() {
-    const menu = document.getElementById('editor-main-menu');
-    menu.innerHTML = '';
-    
-    const items = [
-        {
-            title: 'Create New Map',
-            description: 'Start creating a new map from scratch',
-            action: 'createNewMap'
-        },
-        {
-            title: 'Edit Existing Map',
-            description: 'Load and edit an existing map',
-            action: 'editMap'
-        },
-        {
-            title: 'Delete Map',
-            description: 'Delete an existing map',
-            action: 'deleteMap'
-        }
-    ];
-    
-    items.forEach(itemData => {
-        const item = createMenuItem(
-            itemData.title,
-            itemData.description,
-            () => {
-                // Hide menu immediately for actions that should close the main menu
-                if (itemData.action === 'createNewMap' || itemData.action === 'editMap' || itemData.action === 'deleteMap') {
-                    hideMenu('editor-main-ui');
-                }
-                fetch(`https://${GetParentResourceName()}/editorMainAction`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: itemData.action })
-                });
-            }
-        );
-        menu.appendChild(item);
-    });
-    
-    showMenu('editor-main-ui');
-}
-
-function displayEditorMenu(menuData) {
-    const menu = document.getElementById('editor-menu');
-    menu.innerHTML = '';
-    
-    // Show current map info if editing
-    if (menuData.isEditing && menuData.mapName) {
-        const infoItem = document.createElement('div');
-        infoItem.className = 'menu-item';
-        infoItem.style.background = 'rgba(0, 255, 0, 0.2)';
-        infoItem.style.cursor = 'default';
-        infoItem.style.marginBottom = '12px';
-        const titleEl = document.createElement('div');
-        titleEl.className = 'menu-item-title';
-        titleEl.textContent = `Editing: ${menuData.mapName}`;
-        const descEl = document.createElement('div');
-        descEl.className = 'menu-item-description';
-        descEl.textContent = `Radius: ${menuData.radius.toFixed(1)}m`;
-        infoItem.appendChild(titleEl);
-        infoItem.appendChild(descEl);
-        menu.appendChild(infoItem);
-    }
-    
-    const items = [
-        {
-            title: 'Set Center Point',
-            description: 'Aim and place the center point of the map',
-            action: 'setCenter'
-        },
-        {
-            title: 'Add Spawn Point',
-            description: 'Aim and place a spawn point',
-            action: 'addSpawn'
-        },
-        {
-            title: 'Clear Map',
-            description: 'Clear all map data (center, spawns)',
-            action: 'clearMap'
-        },
-        {
-            title: 'Save Map',
-            description: 'Save the current map',
-            action: 'saveMap'
-        },
-        {
-            title: 'Leave Editor',
-            description: 'Exit the map editor',
-            action: 'leaveEditor'
-        }
-    ];
-    
-    items.forEach(itemData => {
-        const item = createMenuItem(
-            itemData.title,
-            itemData.description,
-            () => {
-                fetch(`https://${GetParentResourceName()}/editorAction`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: itemData.action })
-                });
-            }
-        );
-        menu.appendChild(item);
-    });
-    
-    showMenu('editor-ui');
-}
-
-function displayTeamMenu() {
-    const menu = document.getElementById('team-menu');
-    menu.innerHTML = '';
-    
-    const teams = [
-        { title: 'No Team / FFA', value: null },
-        { title: 'Team 1', value: 1 },
-        { title: 'Team 2', value: 2 }
-    ];
-    
-    teams.forEach(team => {
-        const item = createMenuItem(
-            team.title,
-            team.value ? `Assign spawn to ${team.title}` : 'Free for all spawn point',
-            () => {
-                fetch(`https://${GetParentResourceName()}/selectTeam`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ team: team.value })
-                });
-            }
-        );
-        menu.appendChild(item);
-    });
-    
-    showMenu('team-ui');
-}
-
-function showDialog(title, placeholder, callback) {
-    const dialog = document.getElementById('dialog-ui');
-    const titleEl = document.getElementById('dialog-title');
-    const input = document.getElementById('dialog-input');
-    const errorEl = document.getElementById('dialog-error');
-    
-    titleEl.textContent = title;
-    input.placeholder = placeholder;
-    input.value = '';
-    
-    // Clear any previous errors
-    if (errorEl) {
-        errorEl.textContent = '';
-        errorEl.style.display = 'none';
-    }
-    
-    showMenu('dialog-ui');
-    
-    const submitBtn = document.getElementById('dialog-submit');
-    const cancelBtn = document.getElementById('dialog-cancel');
-    
-    const submitHandler = () => {
-        const value = input.value.trim();
-        if (value) {
-            callback(value);
-        }
-        hideMenu('dialog-ui');
-        submitBtn.removeEventListener('click', submitHandler);
-        cancelBtn.removeEventListener('click', cancelHandler);
-        input.removeEventListener('keypress', enterHandler);
-    };
-    
-    const cancelHandler = () => {
-        hideMenu('dialog-ui');
-        submitBtn.removeEventListener('click', submitHandler);
-        cancelBtn.removeEventListener('click', cancelHandler);
-        input.removeEventListener('keypress', enterHandler);
-    };
-    
-    const enterHandler = (e) => {
-        if (e.key === 'Enter') {
-            submitHandler();
-        }
-    };
-    
-    submitBtn.addEventListener('click', submitHandler);
-    cancelBtn.addEventListener('click', cancelHandler);
-    input.addEventListener('keypress', enterHandler);
-}
-
-// Event listeners
-document.getElementById('gamemode-close').addEventListener('click', () => {
-    hideMenu('gamemode-ui');
-    fetch(`https://${GetParentResourceName()}/closeMenu`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ menu: 'gamemode' })
-    });
-});
-
-document.getElementById('map-close').addEventListener('click', () => {
-    hideMenu('map-ui');
-    fetch(`https://${GetParentResourceName()}/closeMenu`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ menu: 'map' })
-    });
-});
-
-document.getElementById('editor-main-close').addEventListener('click', () => {
-    hideMenu('editor-main-ui');
-    fetch(`https://${GetParentResourceName()}/editorMainAction`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'closeEditorMain' })
-    });
-});
-
-document.getElementById('editor-close').addEventListener('click', () => {
-    hideMenu('editor-ui');
-    fetch(`https://${GetParentResourceName()}/closeMenu`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ menu: 'editor' })
-    });
-});
-
-document.getElementById('team-close').addEventListener('click', () => {
-    hideMenu('team-ui');
-    fetch(`https://${GetParentResourceName()}/closeMenu`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ menu: 'team' })
-    });
-});
-
-document.getElementById('dialog-close').addEventListener('click', () => {
-    hideMenu('dialog-ui');
-    fetch(`https://${GetParentResourceName()}/closeMenu`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ menu: 'dialog' })
-    });
-});
-
-document.getElementById('main-close').addEventListener('click', () => {
-    hideMenu('main-ui');
-    fetch(`https://${GetParentResourceName()}/closeMenu`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ menu: 'main' })
-    });
-});
-
-document.getElementById('browser-close').addEventListener('click', () => {
-    hideMenu('browser-ui');
-    fetch(`https://${GetParentResourceName()}/closeMenu`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ menu: 'browser' })
-    });
-});
-
-document.getElementById('weapon-close').addEventListener('click', () => {
-    hideMenu('weapon-ui');
-    fetch(`https://${GetParentResourceName()}/closeMenu`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ menu: 'weapon' })
-    });
-});
-
-document.getElementById('weapon-config-close').addEventListener('click', () => {
-    hideMenu('weapon-config-ui');
-    fetch(`https://${GetParentResourceName()}/closeMenu`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ menu: 'weapon-config' })
-    });
-});
-
-document.getElementById('pin-close').addEventListener('click', () => {
-    hideMenu('pin-ui');
-    fetch(`https://${GetParentResourceName()}/closeMenu`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ menu: 'pin' })
-    });
-});
-
-document.getElementById('category-select-close').addEventListener('click', () => {
-    hideMenu('category-select-ui');
-    if (pendingWeaponData) {
-        pendingWeaponData = null;
-    }
-    fetch(`https://${GetParentResourceName()}/closeMenu`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ menu: 'category-select' })
-    });
-});
-
-document.getElementById('weapon-select-close').addEventListener('click', () => {
-    hideMenu('weapon-select-ui');
-    if (pendingWeaponData) {
-        pendingWeaponData = null;
-    }
-    fetch(`https://${GetParentResourceName()}/closeMenu`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ menu: 'weapon-select' })
-    });
-});
-
-document.getElementById('error-close').addEventListener('click', () => {
-    hideMenu('error-ui');
-    fetch(`https://${GetParentResourceName()}/closeMenu`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ menu: 'error' })
-    });
-});
-
-document.getElementById('error-ok').addEventListener('click', () => {
-    hideMenu('error-ui');
-    fetch(`https://${GetParentResourceName()}/closeMenu`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ menu: 'error' })
-    });
-});
-
-document.getElementById('admin-matches-close').addEventListener('click', () => {
-    hideMenu('admin-matches-ui');
-    fetch(`https://${GetParentResourceName()}/closeMenu`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ menu: 'admin-matches' })
-    });
-});
-
-// Message handler
-window.addEventListener('message', function(event) {
-    const data = event.data;
-    
-    if (!data || !data.action) return;
-    
-    switch(data.action) {
-        case 'showGameModes':
-            displayGameModes(data.gameModes);
-            break;
-        case 'showMaps':
-            displayMaps(data.maps, data.forEditing || false, data.forDeleting || false);
-            break;
-        case 'showAdminMatches':
-            displayAdminMatches(data.matches);
-            break;
-        case 'showEditorMainMenu':
-            displayEditorMainMenu();
-            break;
-        case 'showEditorMenu':
-            displayEditorMenu(data.menuData);
-            break;
-        case 'showTeamMenu':
-            displayTeamMenu();
-            break;
-        case 'showDialog':
-            showDialog(data.title, data.placeholder, (value) => {
-                fetch(`https://${GetParentResourceName()}/dialogSubmit`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ value: value, type: data.dialogType })
-                });
-            });
-            break;
-        case 'hideMenu':
-            if (data.menu) {
-                hideMenu(data.menu + '-ui');
-            } else {
-                hideAllMenus();
-            }
-            break;
-        case 'showPressE':
-            const pressEUI = document.getElementById('press-e-ui');
-            const pressEText = document.getElementById('press-e-text');
-            
-            if (pressEUI && pressEText) {
-                if (data.text) {
-                    pressEText.innerHTML = parseColorCodes(data.text);
-                }
-                
-                if (data.x !== undefined && data.y !== undefined) {
-                    updatePressEPosition(pressEUI, data.x, data.y);
-                }
-                
-                if (data.opacity !== undefined) {
-                    pressEUI.style.opacity = data.opacity;
+    /**
+     * Display maps
+     */
+    displayMaps(maps, options = {}) {
+        const content = MenuManager.getContent(MENU_IDS.MAP);
+        if (!content) return;
+        
+        content.innerHTML = '';
+        
+        if (!maps || maps.length === 0) {
+            const item = Components.createMenuItem(
+                'No maps available',
+                options.forEditing ? 'Please create maps using the map editor' : 'Please create maps using the map editor',
+                null,
+                { disabled: true, style: { cursor: 'default', opacity: '0.6' } }
+            );
+            content.appendChild(item);
                 } else {
-                    pressEUI.style.opacity = '1';
-                }
-                
-                if (!pressEUIVisible) {
-                    pressEUI.classList.remove('hidden');
-                    pressEUIVisible = true;
-                }
-            }
-            break;
-        case 'hidePressE':
-            const pressEUIHide = document.getElementById('press-e-ui');
-            if (pressEUIHide && pressEUIVisible) {
-                pressEUIHide.classList.add('hidden');
-                pressEUIVisible = false;
-            }
-            break;
-        case 'showMainMenu':
-            displayMainMenu(data.hasMatch || false, data.inMatch || false, data.canStartMatch || false);
-            break;
-        case 'showMatchSettings':
-            showMatchSettings(data.gameModeId, data.mapId);
-            break;
-        case 'showMatchBrowser':
-            displayMatchBrowser(data.matches, data.myMatchId);
-            break;
-        case 'showWeaponSelection':
-            displayWeaponSelection(data.categories, data.weapons, data.gameModeId, data.mapId, data.forMatch);
-            break;
-        case 'showWeaponConfig':
-            // Don't open config menu if weapon-select-ui has an error open
-            const weaponSelectUI = document.getElementById('weapon-select-ui');
-            if (weaponSelectUI && weaponSelectUI.getAttribute('data-error-open') === 'true') {
-                // Error is being displayed, don't switch to config menu
-                break;
-            }
-            
-            console.log('Received showWeaponConfig message:', data);
-            console.log('Full data object keys:', Object.keys(data));
-            console.log('Categories:', data.categories, 'Type:', typeof data.categories, 'Is Array:', Array.isArray(data.categories));
-            console.log('Weapons:', data.weapons, 'Type:', typeof data.weapons, 'Is Array:', Array.isArray(data.weapons));
-            console.log('Categories length:', data.categories?.length, 'Weapons length:', data.weapons?.length);
-            if (data.categories && data.categories.length > 0) {
-                console.log('First category:', data.categories[0]);
-            }
-            // Try both possible property names
-            const categories = data.categories || data.Categories || [];
-            const weapons = data.weapons || data.Weapons || [];
-            console.log('Using categories:', categories.length, 'weapons:', weapons.length);
-            displayWeaponConfig(categories, weapons);
-            break;
-        case 'showError':
-            showError(data.message || 'An error occurred');
-            break;
-    }
-});
+            maps.forEach(map => {
+                const item = Components.createMenuItem(
+                    map.name,
+                    `Spawns: ${map.spawns.length} | Radius: ${map.radius.toFixed(1)}m`,
+                    () => {
+                        if (options.forDeleting) {
+                            DialogManager.showConfirm(
+                                `Are you sure you want to delete map "${map.name}"?\n\nThis action cannot be undone.`,
+                                () => {
+                                    MenuManager.hide(MENU_IDS.CONFIRM);
+                                    Utils.sendNuiCallback('deleteMap', { mapId: map.id });
+                                }
+                            );
+                        } else if (options.forEditing) {
+                            // Loading map for edit - closes UI, release focus
+                            MenuManager.isNavigating = false;
+                            MenuManager.hide(MENU_IDS.MAP);
+                            Utils.sendNuiCallback('loadMapForEdit', { mapId: map.id });
+                        } else {
+                            // Selecting map for match - navigating to match settings
+                            MenuManager.isNavigating = true;
+                            MenuManager.hide(MENU_IDS.MAP, { checkFocusRelease: false });
+                            Utils.sendNuiCallback('selectMap', { mapId: map.id });
+                        }
+                    }
+                );
+                content.appendChild(item);
+            });
+        }
+        
+        MenuManager.show(MENU_IDS.MAP);
+    },
 
-// Confirmation dialog
-let confirmCallback = null;
-
-function showConfirmDialog(message, onYes, onNo) {
-    const confirmUI = document.getElementById('confirm-ui');
-    const confirmMessage = document.getElementById('confirm-message');
-    const confirmYes = document.getElementById('confirm-yes');
-    const confirmNo = document.getElementById('confirm-no');
-    const confirmClose = document.getElementById('confirm-close');
-    
-    confirmMessage.textContent = message;
-    showMenu('confirm-ui');
-    
-    // Remove old listeners
-    const newYes = confirmYes.cloneNode(true);
-    const newNo = confirmNo.cloneNode(true);
-    const newClose = confirmClose.cloneNode(true);
-    confirmYes.parentNode.replaceChild(newYes, confirmYes);
-    confirmNo.parentNode.replaceChild(newNo, confirmNo);
-    confirmClose.parentNode.replaceChild(newClose, confirmClose);
-    
-    newYes.addEventListener('click', () => {
-        hideMenu('confirm-ui');
-        if (onYes) onYes();
-    });
-    
-    newNo.addEventListener('click', () => {
-        hideMenu('confirm-ui');
-        if (onNo) onNo();
-    });
-    
-    newClose.addEventListener('click', () => {
-        hideMenu('confirm-ui');
-        if (onNo) onNo();
-    });
-}
-
-// Main Menu
-function displayMainMenu(hasMatch, inMatch, canStartMatch) {
-    const menu = document.getElementById('main-menu');
-    menu.innerHTML = '';
+    /**
+     * Display main menu
+     */
+    displayMainMenu(hasMatch, inMatch, canStartMatch) {
+        const content = MenuManager.getContent(MENU_IDS.MAIN);
+        if (!content) return;
+        
+        content.innerHTML = '';
     
     const items = [
         {
@@ -850,125 +721,98 @@ function displayMainMenu(hasMatch, inMatch, canStartMatch) {
             description: 'Start a new paintball match',
             onClick: () => {
                 if (hasMatch) {
-                    showConfirmDialog(
+                    DialogManager.showConfirm(
                         'You already have a match created. Do you want to close it and create a new one?',
                         () => {
-                            // Yes - close current match and proceed
-                            hideMenu('confirm-ui');
-                            fetch(`https://${GetParentResourceName()}/closeMatch`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' }
-                            }).then(() => {
-                                hideMenu('main-ui');
-                                fetch(`https://${GetParentResourceName()}/mainAction`, {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ action: 'create' })
-                                });
+                            MenuManager.hide(MENU_IDS.CONFIRM);
+                            Utils.sendNuiCallback('closeMatch').then(() => {
+                                // Only hide main menu, don't release focus - we're navigating to game mode selection
+                                MenuManager.isNavigating = true;
+                                MenuManager.hide(MENU_IDS.MAIN, { checkFocusRelease: false });
+                                // Navigate to game mode selection - this is intentional navigation
+                                Utils.sendNuiCallback('mainAction', { action: 'create' });
                             });
-                        },
-                        () => {
-                            // No - just close dialog, keep menu open
                         }
                     );
                 } else {
-                    hideMenu('main-ui');
-                    fetch(`https://${GetParentResourceName()}/mainAction`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ action: 'create' })
-                    });
+                    // Only hide main menu, don't release focus - we're navigating to game mode selection
+                    MenuManager.isNavigating = true;
+                    MenuManager.hide(MENU_IDS.MAIN, { checkFocusRelease: false });
+                    // Navigate to game mode selection - this is intentional navigation
+                    Utils.sendNuiCallback('mainAction', { action: 'create' });
                 }
-            }
+            },
         },
         {
             title: 'Browse Matches',
             description: 'View and join active matches',
             onClick: () => {
-                hideMenu('main-ui');
-                fetch(`https://${GetParentResourceName()}/mainAction`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'browse' })
-                });
-            }
-        }
-    ];
-    
-    // Add Start Match button if host can start (has minimum players)
+                // Only hide main menu, don't release focus - we're navigating to match browser
+                MenuManager.isNavigating = true;
+                MenuManager.hide(MENU_IDS.MAIN, { checkFocusRelease: false });
+                Utils.sendNuiCallback('mainAction', { action: 'browse' });
+            },
+            },
+        ];
+        
     if (canStartMatch) {
         items.push({
             title: 'Start Match',
             description: 'Start the match now',
             onClick: () => {
-                hideMenu('main-ui');
-                fetch(`https://${GetParentResourceName()}/startMatch`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
-                });
-            }
-        });
-    }
-    
-    // Add Select Weapon button if player is in a match
+                    MenuManager.hideAll();
+                    Utils.sendNuiCallback('startMatch');
+                    // UI will stay closed - match is starting
+                },
+            });
+        }
+        
     if (inMatch) {
         items.push({
             title: 'Select Weapon',
             description: 'Choose your weapon for this match',
             onClick: () => {
-                hideMenu('main-ui');
-                fetch(`https://${GetParentResourceName()}/selectWeapon`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
-                });
-            }
+                // Navigating to weapon selection - set navigation flag
+                MenuManager.isNavigating = true;
+                MenuManager.hide(MENU_IDS.MAIN, { checkFocusRelease: false });
+                Utils.sendNuiCallback('selectWeapon');
+            },
         });
     }
-    
-    // Add Close Match button if they have a match
+        
     if (hasMatch) {
         items.push({
             title: 'Close Match',
             description: 'Close your current match',
             onClick: () => {
-                hideMenu('main-ui');
-                fetch(`https://${GetParentResourceName()}/closeMatch`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
-                }).then(() => {
-                    // Refresh menu to remove Close Match button
-                    setTimeout(() => {
-                        fetch(`https://${GetParentResourceName()}/mainAction`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ action: 'refresh' })
-                        });
-                    }, 500);
-                });
-            }
+                    MenuManager.hideAll();
+                    Utils.sendNuiCallback('closeMatch');
+                    // Don't refresh/reopen - user explicitly closed the match
+                },
         });
     }
     
     items.forEach(item => {
-        const itemEl = createMenuItem(item.title, item.description, item.onClick);
-        menu.appendChild(itemEl);
-    });
-    
-    showMenu('main-ui');
-}
+            content.appendChild(Components.createMenuItem(item.title, item.description, item.onClick));
+        });
+        
+        MenuManager.show(MENU_IDS.MAIN);
+    },
 
-// Match Browser
-function displayMatchBrowser(matches, myMatchId) {
-    const menu = document.getElementById('browser-menu');
-    menu.innerHTML = '';
+    /**
+     * Display match browser
+     */
+    displayMatchBrowser(matches, myMatchId) {
+        const content = MenuManager.getContent(MENU_IDS.BROWSER);
+        if (!content) return;
+        
+        content.innerHTML = '';
     
     if (!matches || matches.length === 0) {
-        const empty = document.createElement('div');
-        empty.className = 'menu-item';
+            const empty = Components.createMenuItem('No active matches', '', null, { disabled: true });
         empty.style.textAlign = 'center';
         empty.style.padding = '20px';
-        empty.textContent = 'No active matches';
-        menu.appendChild(empty);
+            content.appendChild(empty);
     } else {
         matches.forEach(match => {
             const statusText = match.status === 'waiting' ? 'Waiting' : match.status === 'active' ? 'In Progress' : 'Ended';
@@ -976,71 +820,52 @@ function displayMatchBrowser(matches, myMatchId) {
             const privacyText = match.isPrivate ? '🔒 Private' : '🌐 Public';
             const isMyMatch = myMatchId && match.id === myMatchId;
             
-            const item = document.createElement('div');
-            item.className = 'menu-item';
-            
-            // Grey out if it's the player's own match or if it's active and can't join
-            if (isMyMatch) {
-                item.style.cursor = 'default';
-                item.style.opacity = '0.5';
-                item.style.filter = 'grayscale(100%)';
-            } else {
-                item.style.cursor = (match.status === 'active' && !match.allowJoinInProgress) ? 'not-allowed' : 'pointer';
-                item.style.opacity = (match.status === 'active' && !match.allowJoinInProgress) ? '0.6' : '1';
-            }
-            
-            const title = document.createElement('div');
-            title.className = 'menu-item-title';
-            const matchTitle = isMyMatch 
-                ? `${match.gameMode} - ${match.map} <span style="color: #888888; font-size: 11px;">[Your Match]</span>`
-                : `${match.gameMode} - ${match.map} <span style="color: ${statusColor}; font-size: 12px;">[${statusText}]</span>`;
-            title.innerHTML = matchTitle;
-            
-            const desc = document.createElement('div');
-            desc.className = 'menu-item-description';
-            desc.innerHTML = `${privacyText} | Players: ${match.players}/${match.maxPlayers}`;
-            
-            item.appendChild(title);
-            item.appendChild(desc);
-            
-            // Only make clickable if it's not the player's match and not an active match that can't be joined
-            if (!isMyMatch && !(match.status === 'active' && !match.allowJoinInProgress)) {
-                item.addEventListener('click', () => {
-                    // Check if player has a match - will be checked on client side
+                const item = Components.createMenuItem(
+                    `${match.gameMode} - ${match.map}`,
+                    `${privacyText} | Players: ${match.players}/${match.maxPlayers}`,
+                    isMyMatch || (match.status === 'active' && !match.allowJoinInProgress) ? null : () => {
                     if (match.isPrivate) {
-                        showPINDialog(match.id);
+                            DialogManager.showPIN(match.id);
                     } else {
-                        joinMatch(match.id, null);
+                            MatchManager.joinMatch(match.id, null);
+                        }
+                    },
+                    {
+                        disabled: isMyMatch || (match.status === 'active' && !match.allowJoinInProgress),
+                        style: isMyMatch ? { opacity: '0.5', filter: 'grayscale(100%)' } : {},
                     }
-                });
-            }
-            
-            menu.appendChild(item);
-        });
-    }
-    
-    showMenu('browser-ui');
-}
+                );
+                
+                const titleEl = item.querySelector('.menu-item-title');
+                if (titleEl) {
+                    const statusSpan = document.createElement('span');
+                    statusSpan.innerHTML = isMyMatch 
+                        ? ` <span style="color: #888888; font-size: 11px;">[Your Match]</span>`
+                        : ` <span style="color: ${statusColor}; font-size: 12px;">[${statusText}]</span>`;
+                    titleEl.appendChild(statusSpan);
+                }
+                
+                content.appendChild(item);
+            });
+        }
+        
+        MenuManager.show(MENU_IDS.BROWSER);
+    },
 
-// Weapon Selection
-let selectedWeaponData = null;
-function displayWeaponSelection(categories, weapons, gameModeId, mapId, forMatch) {
-    const menu = document.getElementById('weapon-menu');
-    menu.innerHTML = '';
-    
-    // If forMatch is true, this is for selecting weapon in a match, not for match creation
-    if (!forMatch) {
-        selectedWeaponData = { gameModeId, mapId };
-    }
+    /**
+     * Display weapon selection
+     */
+    displayWeaponSelection(categories, weapons, forMatch) {
+        const content = MenuManager.getContent(MENU_IDS.WEAPON);
+        if (!content) return;
+        
+        content.innerHTML = '';
     
     // Group weapons by category
     const weaponsByCategory = {};
     categories.forEach(cat => {
         if (cat.enabled) {
-            weaponsByCategory[cat.id] = {
-                category: cat,
-                weapons: []
-            };
+                weaponsByCategory[cat.id] = { category: cat, weapons: [] };
         }
     });
     
@@ -1054,588 +879,773 @@ function displayWeaponSelection(categories, weapons, gameModeId, mapId, forMatch
     Object.values(weaponsByCategory).forEach(catData => {
         if (catData.weapons.length === 0) return;
         
-        const categoryHeader = document.createElement('div');
-        categoryHeader.className = 'menu-item';
-        categoryHeader.style.background = 'rgba(9, 135, 255, 0.2)';
-        categoryHeader.style.cursor = 'default';
-        categoryHeader.style.fontWeight = '600';
-        categoryHeader.textContent = catData.category.name;
-        menu.appendChild(categoryHeader);
+            const categoryHeader = Components.createMenuItem(
+                catData.category.name,
+                '',
+                null,
+                { style: { background: 'rgba(9, 135, 255, 0.2)', cursor: 'default', fontWeight: '600' } }
+            );
+            content.appendChild(categoryHeader);
         
         catData.weapons.forEach(weapon => {
-            const item = createMenuItem(
+            const item = Components.createMenuItem(
                 weapon.name,
                 `Select ${weapon.name} for this match`,
                 () => {
                     if (forMatch) {
-                        // Player is selecting weapon for their current match
-                        hideMenu('weapon-ui');
-                        fetch(`https://${GetParentResourceName()}/setPlayerWeapon`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ weaponHash: weapon.hash })
-                        }).then(() => {
-                            // Release NUI focus after weapon is selected
-                            fetch(`https://${GetParentResourceName()}/closeMenu`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ menu: 'weapon' })
-                            });
-                        });
-                    } else {
-                        // This shouldn't happen anymore (weapon selection removed from match creation)
-                        // But keep for backwards compatibility
-                        showMatchSettings(weapon.hash);
+                        // Selecting weapon closes UI - release focus
+                        MenuManager.isNavigating = false;
+                        MenuManager.hideAll();
+                        Utils.sendNuiCallback('setPlayerWeapon', { weaponHash: weapon.hash });
                     }
                 }
             );
-            menu.appendChild(item);
+            content.appendChild(item);
         });
     });
     
-    showMenu('weapon-ui');
-}
+        // Clear navigation flag when weapon selection is shown (navigation complete)
+        MenuManager.isNavigating = false;
+        MenuManager.show(MENU_IDS.WEAPON);
+    },
 
-// Match Settings (Private/PIN) - no weapon selection
-function showMatchSettings(gameModeId, mapId) {
-    const menu = document.getElementById('weapon-menu');
-    menu.innerHTML = '';
-    
-    // Store game mode and map for match creation
-    selectedWeaponData = { gameModeId, mapId };
-    
-    const privateOption = createMenuItem(
+    /**
+     * Display match settings (private/public)
+     */
+    displayMatchSettings(gameModeId, mapId) {
+        const content = MenuManager.getContent(MENU_IDS.WEAPON);
+        if (!content) return;
+        
+        content.innerHTML = '';
+        
+        MatchManager.selectedData = { gameModeId, mapId };
+        
+        const privateOption = Components.createMenuItem(
         'Create Private Match',
         'Require a PIN to join',
-        () => {
-            showDialog('Enter PIN', 'Enter 4-6 digit PIN', (pin) => {
-                const errorEl = document.getElementById('dialog-error');
-                if (pin.length >= 4 && pin.length <= 6 && /^\d+$/.test(pin)) {
-                    if (errorEl) {
-                        errorEl.textContent = '';
-                        errorEl.style.display = 'none';
+            () => DialogManager.showPINInput((pin) => MatchManager.createMatch(true, pin))
+        );
+        
+        const publicOption = Components.createMenuItem(
+            'Create Public Match',
+            'Anyone can join',
+            () => MatchManager.createMatch(false, null)
+        );
+        
+        content.appendChild(privateOption);
+        content.appendChild(publicOption);
+        MenuManager.show(MENU_IDS.WEAPON);
+    },
+
+    /**
+     * Display editor main menu
+     */
+    displayEditorMainMenu() {
+        const content = MenuManager.getContent(MENU_IDS.EDITOR_MAIN);
+        if (!content) return;
+        
+        content.innerHTML = '';
+        
+        const items = [
+            { title: 'Create New Map', description: 'Start creating a new map from scratch', action: 'createNewMap' },
+            { title: 'Edit Existing Map', description: 'Load and edit an existing map', action: 'editMap' },
+            { title: 'Delete Map', description: 'Delete an existing map', action: 'deleteMap' },
+        ];
+        
+        items.forEach(itemData => {
+            const item = Components.createMenuItem(
+                itemData.title,
+                itemData.description,
+                () => {
+                    if (['createNewMap', 'editMap', 'deleteMap'].includes(itemData.action)) {
+                        // "Edit Map" and "Delete Map" navigate to maps menu - set navigation flag
+                        // "Create New Map" closes UI to start editor - don't set navigation flag
+                        if (itemData.action === 'editMap' || itemData.action === 'deleteMap') {
+                            MenuManager.isNavigating = true;
+                            MenuManager.hide(MENU_IDS.EDITOR_MAIN, { checkFocusRelease: false });
+                        } else {
+                            // Create New Map - closes UI, release focus
+                            MenuManager.isNavigating = false;
+                            MenuManager.hide(MENU_IDS.EDITOR_MAIN);
+                        }
                     }
-                    // Don't hide menus here - let server confirmation handle it
-                    createMatch(null, true, pin);
-                } else {
-                    showError('PIN must be 4-6 digits');
-                    // Re-show dialog with error
-                    setTimeout(() => {
-                        showDialog('Enter PIN', 'Enter 4-6 digit PIN', arguments.callee);
-                    }, 100);
+                    Utils.sendNuiCallback('editorMainAction', { action: itemData.action });
                 }
+            );
+            content.appendChild(item);
+        });
+        
+        MenuManager.show(MENU_IDS.EDITOR_MAIN);
+    },
+
+    /**
+     * Display editor menu
+     */
+    displayEditorMenu(menuData) {
+        const content = MenuManager.getContent(MENU_IDS.EDITOR);
+        if (!content) return;
+        
+        content.innerHTML = '';
+        
+        if (menuData.isEditing && menuData.mapName) {
+            const infoItem = Components.createMenuItem(
+                `Editing: ${menuData.mapName}`,
+                `Radius: ${menuData.radius.toFixed(1)}m`,
+                null,
+                { style: { background: 'rgba(0, 255, 0, 0.2)', cursor: 'default', marginBottom: '12px' } }
+            );
+            content.appendChild(infoItem);
+        }
+        
+        const items = [
+            { title: 'Set Center Point', description: 'Aim and place the center point of the map', action: 'setCenter' },
+            { title: 'Add Spawn Point', description: 'Aim and place a spawn point', action: 'addSpawn' },
+            { title: 'Clear Map', description: 'Clear all map data (center, spawns)', action: 'clearMap' },
+            { title: 'Save Map', description: 'Save the current map', action: 'saveMap' },
+            { title: 'Leave Editor', description: 'Exit the map editor', action: 'leaveEditor' },
+        ];
+        
+        items.forEach(itemData => {
+            const item = Components.createMenuItem(
+                itemData.title,
+                itemData.description,
+                () => {
+                    // Actions that navigate to other menus
+                    if (itemData.action === 'addSpawn') {
+                        // Navigating to team selection
+                        MenuManager.isNavigating = true;
+                        MenuManager.hide(MENU_IDS.EDITOR, { checkFocusRelease: false });
+                    } else if (itemData.action === 'clearMap') {
+                        // Clear Map closes UI completely - release focus
+                        MenuManager.isNavigating = false;
+                        MenuManager.hideAll();
+                    } else if (itemData.action === 'saveMap') {
+                        // Client will handle focus management for saveMap
+                        // Just hide the menu - don't set navigation flag here
+                        // The client will send hideMenu and manage focus explicitly
+                        MenuManager.hide(MENU_IDS.EDITOR, { checkFocusRelease: false });
+                    } else {
+                        // Actions that close UI (setCenter, leaveEditor)
+                        MenuManager.isNavigating = false;
+                        MenuManager.hide(MENU_IDS.EDITOR);
+                    }
+                    Utils.sendNuiCallback('editorAction', { action: itemData.action });
+                }
+            );
+            content.appendChild(item);
+        });
+        
+        // Clear navigation flag when editor menu is shown (navigation complete)
+        MenuManager.isNavigating = false;
+        MenuManager.show(MENU_IDS.EDITOR);
+    },
+
+    /**
+     * Display team menu
+     */
+    displayTeamMenu() {
+        const content = MenuManager.getContent(MENU_IDS.TEAM);
+        if (!content) return;
+        
+        content.innerHTML = '';
+        
+        const teams = [
+            { title: 'No Team / FFA', value: null },
+            { title: 'Team 1', value: 1 },
+            { title: 'Team 2', value: 2 },
+        ];
+        
+        teams.forEach(team => {
+            const item = Components.createMenuItem(
+                team.title,
+                team.value ? `Assign spawn to ${team.title}` : 'Free for all spawn point',
+                () => {
+                    // Selecting team closes UI to start placing spawn - release focus
+                    MenuManager.isNavigating = false;
+                    MenuManager.hide(MENU_IDS.TEAM);
+                    Utils.sendNuiCallback('selectTeam', { team: team.value });
+                }
+            );
+            content.appendChild(item);
+        });
+        
+        MenuManager.show(MENU_IDS.TEAM);
+    },
+
+    /**
+     * Display admin matches
+     */
+    displayAdminMatches(matches) {
+        const content = MenuManager.getContent(MENU_IDS.ADMIN_MATCHES);
+        if (!content) return;
+        
+        content.innerHTML = '';
+        
+        if (!matches || matches.length === 0) {
+            const item = Components.createMenuItem(
+                'No active matches',
+                'There are currently no active paintball matches',
+                null,
+                { disabled: true, style: { cursor: 'default', opacity: '0.6' } }
+            );
+            content.appendChild(item);
+        } else {
+            matches.forEach(match => {
+                const statusColor = match.status === 'active' ? '#00ff00' : '#ffff00';
+                const statusText = match.status === 'active' ? 'Active' : 'Waiting';
+                
+                const item = Components.createMenuItem(
+                    `${match.gameMode} - ${match.map}`,
+                    `Status: ${statusText} | Players: ${match.players}/${match.maxPlayers} | Bucket: ${match.bucket}`,
+        () => {
+                        DialogManager.showConfirm(
+                            `Are you sure you want to close this match?\n\nGame Mode: ${match.gameMode}\nMap: ${match.map}\nPlayers: ${match.players}/${match.maxPlayers}`,
+                            () => {
+                                MenuManager.hide(MENU_IDS.CONFIRM);
+                                // Admin close match refreshes the same menu - keep focus, don't release
+                                MenuManager.isNavigating = true;
+                                Utils.sendNuiCallback('adminCloseMatch', { matchId: match.id });
+                                // Client will refresh the admin matches menu automatically
+                            }
+                        );
+                    }
+                );
+                
+                const titleEl = item.querySelector('.menu-item-title');
+                if (titleEl) {
+                    const statusSpan = document.createElement('span');
+                    statusSpan.textContent = `[${statusText}]`;
+                    statusSpan.style.color = statusColor;
+                    statusSpan.style.marginLeft = '8px';
+                    titleEl.appendChild(statusSpan);
+                }
+                
+                content.appendChild(item);
             });
         }
-    );
-    
-    const publicOption = createMenuItem(
-        'Create Public Match',
-        'Anyone can join',
-        () => {
-            // Don't hide menus here - let server confirmation handle it
-            createMatch(null, false, null);
+        
+        MenuManager.show(MENU_IDS.ADMIN_MATCHES);
+    },
+};
+
+// ============================================================================
+// DIALOG MANAGER
+// ============================================================================
+const DialogManager = {
+    /**
+     * Show dialog
+     */
+    showDialog(title, placeholder, callback, options = {}) {
+        const menu = MenuManager.get(MENU_IDS.DIALOG);
+        if (!menu) return;
+        
+        const titleEl = menu.querySelector('.paintball-title');
+        const input = menu.querySelector('input') || Components.createInput(placeholder, options);
+        const errorEl = menu.querySelector('.error-message');
+        const dialogContent = menu.querySelector('.paintball-dialog');
+        
+        if (titleEl) titleEl.textContent = title;
+        if (input) {
+            input.placeholder = placeholder;
+            input.value = options.value || '';
+            if (!menu.contains(input)) {
+                dialogContent.insertBefore(input, errorEl?.nextSibling || null);
+            }
         }
-    );
-    
-    menu.appendChild(privateOption);
-    menu.appendChild(publicOption);
-    showMenu('weapon-ui');
-}
+        
+        if (errorEl) {
+            errorEl.textContent = '';
+            errorEl.style.display = 'none';
+        }
+        
+        const submitBtn = menu.querySelector('#dialog-submit') || Components.createButton('Submit', null, 'primary', { id: 'dialog-submit' });
+        const cancelBtn = menu.querySelector('#dialog-cancel') || Components.createButton('Cancel', null, 'secondary', { id: 'dialog-cancel' });
+        const buttonContainer = menu.querySelector('.dialog-buttons') || document.createElement('div');
+        
+        if (!menu.contains(buttonContainer)) {
+            buttonContainer.className = 'dialog-buttons';
+            dialogContent.appendChild(buttonContainer);
+        }
+        
+        buttonContainer.innerHTML = '';
+        
+        const submitHandler = () => {
+            const value = input.value.trim();
+            if (value) {
+                callback(value);
+            }
+            // Client will handle focus management after dialog submit
+            // Clear navigation flag so UI doesn't interfere
+            MenuManager.isNavigating = false;
+            MenuManager.hide(MENU_IDS.DIALOG, { checkFocusRelease: false });
+        };
+        
+        const cancelHandler = () => {
+            // Canceling dialog - clear navigation flag and release focus
+            // Client won't reopen any menu when dialog is cancelled
+            MenuManager.isNavigating = false;
+            MenuManager.hide(MENU_IDS.DIALOG);
+        };
+        
+        const enterHandler = (e) => {
+            if (e.key === 'Enter') submitHandler();
+        };
+        
+        submitBtn.addEventListener('click', submitHandler);
+        cancelBtn.addEventListener('click', cancelHandler);
+        input.addEventListener('keypress', enterHandler);
+        
+        buttonContainer.appendChild(submitBtn);
+        buttonContainer.appendChild(cancelBtn);
+        
+        MenuManager.show(MENU_IDS.DIALOG);
+    },
 
-function createMatch(weaponHash, isPrivate, pin) {
-    // Validate selectedWeaponData exists
-    if (!selectedWeaponData || !selectedWeaponData.gameModeId || !selectedWeaponData.mapId) {
-        showError('Missing game mode or map selection. Please try again.');
-        return;
-    }
-    
-    // Don't hide menus here - let the server confirmation handle it
-    // This prevents the UI from disappearing before we know if the match was created successfully
-    
-    fetch(`https://${GetParentResourceName()}/createMatch`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            gameModeId: selectedWeaponData.gameModeId,
-            mapId: selectedWeaponData.mapId,
-            isPrivate: isPrivate,
-            pin: pin
-        })
-    }).catch((error) => {
-        console.error('Match creation error:', error);
-        showError('Failed to create match. Please try again.');
-    });
-}
-
-function showPINDialog(matchId) {
-    const dialog = document.getElementById('pin-ui');
-    const input = document.getElementById('pin-input');
-    const errorEl = document.getElementById('pin-error');
-    input.value = '';
-    
-    // Clear any previous errors
+    /**
+     * Show PIN dialog
+     */
+    showPIN(matchId) {
+        const menu = MenuManager.get(MENU_IDS.PIN);
+        if (!menu) return;
+        
+        const input = menu.querySelector('#pin-input') || Components.createInput('Enter match PIN', { maxLength: 6, id: 'pin-input' });
+        const errorEl = menu.querySelector('#pin-error') || menu.querySelector('.error-message');
+        const dialogContent = menu.querySelector('.paintball-dialog');
+        
+        input.value = '';
     if (errorEl) {
         errorEl.textContent = '';
         errorEl.style.display = 'none';
     }
     
-    showMenu('pin-ui');
-    setTimeout(() => input.focus(), 100);
-    
-    const submitBtn = document.getElementById('pin-submit');
-    const cancelBtn = document.getElementById('pin-cancel');
+        if (!menu.contains(input)) {
+            dialogContent.insertBefore(input, errorEl?.nextSibling || null);
+        }
+        
+        const submitBtn = menu.querySelector('#pin-submit') || Components.createButton('Join', null, 'primary', { id: 'pin-submit' });
+        const cancelBtn = menu.querySelector('#pin-cancel') || Components.createButton('Cancel', null, 'secondary', { id: 'pin-cancel' });
+        const buttonContainer = menu.querySelector('.dialog-buttons') || document.createElement('div');
+        
+        if (!menu.contains(buttonContainer)) {
+            buttonContainer.className = 'dialog-buttons';
+            dialogContent.appendChild(buttonContainer);
+        }
+        
+        buttonContainer.innerHTML = '';
     
     const submitHandler = () => {
         const pin = input.value.trim();
         if (pin) {
-            // joinMatch will handle the confirmation check
-            joinMatch(matchId, pin);
+                MatchManager.joinMatch(matchId, pin);
         }
-        submitBtn.removeEventListener('click', submitHandler);
-        cancelBtn.removeEventListener('click', cancelHandler);
-        input.removeEventListener('keypress', enterHandler);
     };
     
     const cancelHandler = () => {
-        hideMenu('pin-ui');
-        submitBtn.removeEventListener('click', submitHandler);
-        cancelBtn.removeEventListener('click', cancelHandler);
-        input.removeEventListener('keypress', enterHandler);
+            MenuManager.hide(MENU_IDS.PIN);
     };
     
     const enterHandler = (e) => {
-        if (e.key === 'Enter') {
-            submitHandler();
-        }
+            if (e.key === 'Enter') submitHandler();
     };
     
     submitBtn.addEventListener('click', submitHandler);
     cancelBtn.addEventListener('click', cancelHandler);
     input.addEventListener('keypress', enterHandler);
-}
+        
+        buttonContainer.appendChild(submitBtn);
+        buttonContainer.appendChild(cancelBtn);
+        
+        MenuManager.show(MENU_IDS.PIN);
+        setTimeout(() => input.focus(), CONFIG.INPUT_FOCUS_DELAY);
+    },
 
-function joinMatch(matchId, pin) {
-    // Check if player has a match - this will be checked on client side
-    fetch(`https://${GetParentResourceName()}/checkHasMatch`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-    }).then(response => response.json()).then(data => {
-        if (data.hasMatch) {
-            showConfirmDialog(
-                'You already have a match created. Do you want to close it and join this match?',
-                () => {
-                    // Yes - close current match and join
-                    hideMenu('confirm-ui');
-                    hideMenu('browser-ui');
-                    hideMenu('pin-ui');
-                    fetch(`https://${GetParentResourceName()}/closeMatch`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' }
-                    }).then(() => {
-                        fetch(`https://${GetParentResourceName()}/joinMatch`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ matchId: matchId, pin: pin || null })
-                        });
-                    });
-                },
-                () => {
-                    // No - just close dialog
+    /**
+     * Show PIN input for match creation
+     */
+    showPINInput(callback) {
+        this.showDialog('Enter PIN', 'Enter 4-6 digit PIN', (pin) => {
+            const errorEl = MenuManager.get(MENU_IDS.DIALOG)?.querySelector('.error-message');
+            if (pin.length >= 4 && pin.length <= 6 && /^\d+$/.test(pin)) {
+                if (errorEl) {
+                    errorEl.textContent = '';
+                    errorEl.style.display = 'none';
                 }
-            );
+                callback(pin);
         } else {
-            fetch(`https://${GetParentResourceName()}/joinMatch`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ matchId: matchId, pin: pin || null })
-            });
-            hideMenu('browser-ui');
-            hideMenu('pin-ui');
-        }
-    });
-}
+                Components.showError(errorEl, 'PIN must be 4-6 digits');
+                setTimeout(() => this.showPINInput(callback), 100);
+            }
+        });
+    },
 
-// Admin Weapon Config
-function displayWeaponConfig(categories, weapons) {
-    console.log('displayWeaponConfig called with', categories?.length || 0, 'categories and', weapons?.length || 0, 'weapons');
-    
-    // Store weapons list for client-side validation
-    currentWeaponsList = weapons || [];
-    
-    // Close any open dialogs first, but respect error flag on weapon-select-ui
-    hideMenu('dialog-ui');
-    hideMenu('category-select-ui');
-    // Don't force close weapon-select-ui if it has an error - let hideMenu handle it
-    const weaponSelectUI = document.getElementById('weapon-select-ui');
-    if (!weaponSelectUI || weaponSelectUI.getAttribute('data-error-open') !== 'true') {
-        hideMenu('weapon-select-ui');
-    }
-    
-    const menu = document.getElementById('weapon-config-menu');
-    if (!menu) {
-        console.error('weapon-config-menu element not found!');
+    /**
+     * Show confirmation dialog
+     */
+    showConfirm(message, onYes, onNo) {
+        const menu = MenuManager.get(MENU_IDS.CONFIRM);
+        if (!menu) return;
+        
+        const messageEl = menu.querySelector('#confirm-message') || document.createElement('div');
+        messageEl.id = 'confirm-message';
+        messageEl.textContent = message;
+        messageEl.style.cssText = 'color: #FFFFFF; font-size: 14px; line-height: 1.6; margin-bottom: 16px; text-align: center;';
+        
+        const dialogContent = menu.querySelector('.paintball-dialog');
+        if (!dialogContent.contains(messageEl)) {
+            dialogContent.insertBefore(messageEl, dialogContent.firstChild);
+        }
+        
+        const buttonContainer = menu.querySelector('.dialog-buttons') || document.createElement('div');
+        if (!menu.contains(buttonContainer)) {
+            buttonContainer.className = 'dialog-buttons';
+            dialogContent.appendChild(buttonContainer);
+        }
+        
+        buttonContainer.innerHTML = '';
+        
+        const yesBtn = Components.createButton('Yes', () => {
+            MenuManager.hide(MENU_IDS.CONFIRM);
+            if (onYes) onYes();
+        }, 'primary', { style: { flex: '1', marginRight: '8px' } });
+        
+        const noBtn = Components.createButton('No', () => {
+            MenuManager.hide(MENU_IDS.CONFIRM);
+            if (onNo) onNo();
+        }, 'secondary', { style: { flex: '1' } });
+        
+        buttonContainer.appendChild(yesBtn);
+        buttonContainer.appendChild(noBtn);
+        
+        MenuManager.show(MENU_IDS.CONFIRM);
+    },
+
+    /**
+     * Show error dialog
+     */
+    showError(message) {
+        // Try to show inline error first
+        const currentMenu = MenuManager.currentMenu;
+        let errorEl = null;
+        
+        if (currentMenu === MENU_IDS.DIALOG) {
+            errorEl = MenuManager.get(MENU_IDS.DIALOG)?.querySelector('.error-message');
+        } else if (currentMenu === MENU_IDS.PIN) {
+            errorEl = MenuManager.get(MENU_IDS.PIN)?.querySelector('.error-message');
+        } else if (currentMenu === MENU_IDS.WEAPON_SELECT) {
+            errorEl = MenuManager.get(MENU_IDS.WEAPON_SELECT)?.querySelector('.error-message');
+        }
+        
+        if (errorEl) {
+            Components.showError(errorEl, message);
         return;
     }
-    menu.innerHTML = '';
-    
-    // Add Weapon button (categories are read-only from config)
-    const addWepBtn = document.createElement('button');
-    addWepBtn.className = 'btn-primary';
-    addWepBtn.style.width = '100%';
-    addWepBtn.style.marginBottom = '16px';
-    addWepBtn.textContent = '+ Add Weapon';
-    addWepBtn.addEventListener('click', () => {
-        showAddWeaponDialog(categories);
-    });
-    menu.appendChild(addWepBtn);
-    
-    // Categories section (read-only from config)
-    const catHeader = document.createElement('div');
-    catHeader.className = 'menu-item';
-    catHeader.style.background = 'rgba(9, 135, 255, 0.3)';
-    catHeader.style.cursor = 'default';
-    catHeader.style.fontWeight = '600';
-    catHeader.style.marginTop = '16px';
-    catHeader.textContent = 'Categories';
-    menu.appendChild(catHeader);
+        
+        // Fallback to popup
+        const menu = MenuManager.get(MENU_IDS.ERROR);
+        if (!menu) return;
+        
+        const messageEl = menu.querySelector('#error-message') || document.createElement('div');
+        messageEl.id = 'error-message';
+        messageEl.textContent = message;
+        messageEl.style.cssText = 'color: #FFFFFF; font-size: 14px; line-height: 1.6; margin-bottom: 16px; text-align: center;';
+        
+        const dialogContent = menu.querySelector('.paintball-dialog');
+        if (!dialogContent.contains(messageEl)) {
+            dialogContent.insertBefore(messageEl, dialogContent.firstChild);
+        }
+        
+        const buttonContainer = menu.querySelector('.dialog-buttons') || document.createElement('div');
+        if (!menu.contains(buttonContainer)) {
+            buttonContainer.className = 'dialog-buttons';
+            dialogContent.appendChild(buttonContainer);
+        }
+        
+        buttonContainer.innerHTML = '';
+        
+        const okBtn = Components.createButton('OK', () => MenuManager.hide(MENU_IDS.ERROR), 'primary', { style: { width: '100%' } });
+        buttonContainer.appendChild(okBtn);
+        
+        MenuManager.show(MENU_IDS.ERROR);
+    },
+};
+
+// ============================================================================
+// MATCH MANAGER
+// ============================================================================
+const MatchManager = {
+    selectedData: null,
+
+    /**
+     * Create a match
+     */
+    createMatch(isPrivate, pin) {
+        if (!this.selectedData || !this.selectedData.gameModeId || !this.selectedData.mapId) {
+            DialogManager.showError('Missing game mode or map selection. Please try again.');
+            return;
+        }
+        
+        // Close all menus - match creation will be handled server-side
+        MenuManager.hideAll();
+        
+        Utils.sendNuiCallback('createMatch', {
+            gameModeId: this.selectedData.gameModeId,
+            mapId: this.selectedData.mapId,
+            isPrivate: isPrivate,
+            pin: pin,
+        }).catch(() => {
+            DialogManager.showError('Failed to create match. Please try again.');
+        });
+    },
+
+    /**
+     * Join a match
+     */
+    joinMatch(matchId, pin) {
+        // Check if player has a match - this will be checked on client side
+        // For now, just attempt to join - client will handle validation
+        Utils.sendNuiCallback('joinMatch', { matchId, pin: pin || null });
+        MenuManager.hide(MENU_IDS.BROWSER);
+        MenuManager.hide(MENU_IDS.PIN);
+    },
+};
+
+// ============================================================================
+// WEAPON CONFIG MANAGER
+// ============================================================================
+const WeaponConfigManager = {
+    currentWeaponsList: [],
+
+    /**
+     * Display weapon configuration
+     */
+    displayWeaponConfig(categories, weapons) {
+        const content = MenuManager.getContent(MENU_IDS.WEAPON_CONFIG);
+        if (!content) return;
+        
+        this.currentWeaponsList = weapons || [];
+        content.innerHTML = '';
+        
+        // Add Weapon button
+        const addWepBtn = Components.createButton('+ Add Weapon', () => {
+            this.showAddWeaponDialog(categories);
+        }, 'primary', { style: { width: '100%', marginBottom: '16px' } });
+        content.appendChild(addWepBtn);
+        
+        // Categories section
+        const catHeader = Components.createMenuItem('Categories', '', null, {
+            style: { background: 'rgba(9, 135, 255, 0.3)', cursor: 'default', fontWeight: '600', marginTop: '16px' },
+        });
+        content.appendChild(catHeader);
     
     if (categories.length === 0) {
-        const emptyMsg = document.createElement('div');
-        emptyMsg.className = 'menu-item';
-        emptyMsg.style.opacity = '0.6';
-        emptyMsg.style.cursor = 'default';
-        emptyMsg.textContent = 'No categories found';
-        menu.appendChild(emptyMsg);
+            const emptyMsg = Components.createMenuItem('No categories found', '', null, {
+                disabled: true,
+                style: { opacity: '0.6', cursor: 'default' },
+            });
+            content.appendChild(emptyMsg);
     } else {
         categories.forEach(cat => {
-            const item = document.createElement('div');
-            item.className = 'menu-item';
-            item.style.cursor = 'default';
-            item.style.opacity = cat.enabled ? '1.0' : '0.6';
-            
-            const left = document.createElement('div');
-            left.innerHTML = `<div style="font-weight: 600;">${cat.name}</div><div style="font-size: 11px; color: #888;">ID: ${cat.id} ${cat.enabled ? '(Enabled)' : '(Disabled)'}</div>`;
-            
-            item.appendChild(left);
-            menu.appendChild(item);
+                const item = Components.createMenuItem(
+                    cat.name,
+                    `ID: ${cat.id} ${cat.enabled ? '(Enabled)' : '(Disabled)'}`,
+                    null,
+                    { style: { cursor: 'default', opacity: cat.enabled ? '1.0' : '0.6' } }
+                );
+                content.appendChild(item);
         });
     }
     
     // Weapons section
-    const wepHeader = document.createElement('div');
-    wepHeader.className = 'menu-item';
-    wepHeader.style.background = 'rgba(9, 135, 255, 0.3)';
-    wepHeader.style.cursor = 'default';
-    wepHeader.style.fontWeight = '600';
-    wepHeader.style.marginTop = '16px';
-    wepHeader.textContent = 'Weapons';
-    menu.appendChild(wepHeader);
+        const wepHeader = Components.createMenuItem('Weapons', '', null, {
+            style: { background: 'rgba(9, 135, 255, 0.3)', cursor: 'default', fontWeight: '600', marginTop: '16px' },
+        });
+        content.appendChild(wepHeader);
     
     if (weapons.length === 0) {
-        const emptyMsg = document.createElement('div');
-        emptyMsg.className = 'menu-item';
-        emptyMsg.style.opacity = '0.6';
-        emptyMsg.style.cursor = 'default';
-        emptyMsg.textContent = 'No weapons yet';
-        menu.appendChild(emptyMsg);
+            const emptyMsg = Components.createMenuItem('No weapons yet', '', null, {
+                disabled: true,
+                style: { opacity: '0.6', cursor: 'default' },
+            });
+            content.appendChild(emptyMsg);
     } else {
         weapons.forEach(weapon => {
             const item = document.createElement('div');
             item.className = 'menu-item';
-            item.style.display = 'flex';
-            item.style.justifyContent = 'space-between';
-            item.style.alignItems = 'center';
+                item.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
             
             const left = document.createElement('div');
             left.innerHTML = `<div style="font-weight: 600;">${weapon.name}</div><div style="font-size: 11px; color: #888;">${weapon.category} | Hash: ${weapon.hash}</div>`;
             
             const right = document.createElement('div');
-            right.style.display = 'flex';
-            right.style.gap = '8px';
-            right.style.alignItems = 'center';
-            
-            const toggle = document.createElement('button');
-            toggle.className = weapon.enabled ? 'btn-primary' : 'btn-secondary';
-            toggle.style.padding = '6px 12px';
-            toggle.style.fontSize = '12px';
-            toggle.textContent = weapon.enabled ? 'Enabled' : 'Disabled';
-            toggle.addEventListener('click', (e) => {
+                right.style.cssText = 'display: flex; gap: 8px; align-items: center;';
+                
+                const toggle = Components.createButton(
+                    weapon.enabled ? 'Enabled' : 'Disabled',
+                    (e) => {
                 e.stopPropagation();
                 const newState = !weapon.enabled;
                 weapon.enabled = newState;
                 toggle.textContent = newState ? 'Enabled' : 'Disabled';
                 toggle.className = newState ? 'btn-primary' : 'btn-secondary';
-                fetch(`https://${GetParentResourceName()}/updateWeaponConfig`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ type: 'weapon', hash: weapon.hash, enabled: newState })
-                });
-            });
-            
-            const removeBtn = document.createElement('button');
-            removeBtn.className = 'btn-secondary';
-            removeBtn.style.padding = '6px 12px';
-            removeBtn.style.fontSize = '12px';
-            removeBtn.style.background = 'rgba(255, 68, 68, 0.2)';
-            removeBtn.style.borderColor = '#ff4444';
-            removeBtn.style.color = '#ff4444';
-            removeBtn.textContent = 'Remove';
-            removeBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                showConfirmDialog(
-                    `Are you sure you want to remove weapon "${weapon.name}"?`,
-                    () => {
-                        hideMenu('confirm-ui');
-                        fetch(`https://${GetParentResourceName()}/removeWeapon`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ hash: weapon.hash })
-                        }).then(() => {
-                            setTimeout(() => {
-                                fetch(`https://${GetParentResourceName()}/refreshWeaponConfig`, {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' }
-                                });
-                            }, 300);
+                        Utils.sendNuiCallback('updateWeaponConfig', {
+                            type: 'weapon',
+                            hash: weapon.hash,
+                            enabled: newState,
                         });
                     },
+                    weapon.enabled ? 'primary' : 'secondary',
+                    { style: { padding: '6px 12px', fontSize: '12px' } }
+                );
+                
+                const removeBtn = Components.createButton(
+                    'Remove',
+                    (e) => {
+                e.stopPropagation();
+                        DialogManager.showConfirm(
+                    `Are you sure you want to remove weapon "${weapon.name}"?`,
                     () => {
-                        hideMenu('confirm-ui');
+                                MenuManager.hide(MENU_IDS.CONFIRM);
+                                Utils.sendNuiCallback('removeWeapon', { hash: weapon.hash }).then(() => {
+                            setTimeout(() => {
+                                        Utils.sendNuiCallback('refreshWeaponConfig');
+                            }, 300);
+                        });
+                            }
+                        );
+                    },
+                    'secondary',
+                    {
+                        style: {
+                            padding: '6px 12px',
+                            fontSize: '12px',
+                            background: 'rgba(255, 68, 68, 0.2)',
+                            borderColor: '#ff4444',
+                            color: '#ff4444',
+                        },
                     }
                 );
-            });
             
             right.appendChild(toggle);
             right.appendChild(removeBtn);
             
             item.appendChild(left);
             item.appendChild(right);
-            menu.appendChild(item);
-        });
-    }
-    
-    // Ensure menu is shown and visible - force display
-    const weaponConfigUI = document.getElementById('weapon-config-ui');
-    if (weaponConfigUI) {
-        console.log('Showing weapon-config-ui menu');
-        weaponConfigUI.style.display = 'flex';
-        weaponConfigUI.classList.remove('hidden');
-        weaponConfigUI.classList.add('active');
-        currentMenu = 'weapon-config-ui';
-    } else {
-        console.error('weapon-config-ui element not found!');
-    }
-}
+                content.appendChild(item);
+            });
+        }
+        
+        MenuManager.show(MENU_IDS.WEAPON_CONFIG);
+    },
 
-// Categories are read-only from config - no add category dialog
-function showAddCategoryDialog() {
-    // This function is no longer used - categories are defined in config.lua
-    showError('Categories are read-only. Edit config.lua to modify categories.');
-}
-
-// Store weapon data temporarily for category selection
-let pendingWeaponData = null;
-// Store current weapons list for validation
-let currentWeaponsList = [];
-
-function showAddWeaponDialog(categories) {
-    // Hide weapon config menu first
-    hideMenu('weapon-config-ui');
-    
-    // Get OX items first
-    fetch(`https://${GetParentResourceName()}/getOXItems`, {
+    /**
+     * Show add weapon dialog
+     */
+    showAddWeaponDialog(categories) {
+        // Navigating to weapon selection dialog - set navigation flag
+        MenuManager.isNavigating = true;
+        MenuManager.hide(MENU_IDS.WEAPON_CONFIG, { checkFocusRelease: false });
+        
+        fetch(`https://${Utils.getResourceName()}/getOXItems`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-    }).then(response => response.json())
+            headers: { 'Content-Type': 'application/json' },
+        })
+            .then(response => response.json())
     .then(data => {
-        // Filter to only show items starting with "weapon_"
         const weaponItems = (data.items || []).filter(item => {
             const itemName = item.name || '';
             return itemName.toLowerCase().startsWith('weapon_');
         });
-        showWeaponSelectionDialog(categories, weaponItems);
+                this.showWeaponSelectionDialog(categories, weaponItems);
     })
     .catch(() => {
-        // If OX items fail, show dialog without dropdown
-        showWeaponSelectionDialog(categories, []);
-    });
-}
+                this.showWeaponSelectionDialog(categories, []);
+            });
+    },
 
-// Check if weapon already exists
-function checkWeaponExists(weaponHash, weaponName) {
-    if (!currentWeaponsList || currentWeaponsList.length === 0) {
-        return false;
-    }
-    
-    // Check if weapon exists in current list
-    // Since server converts string hashes to numbers, we can't directly compare
-    // Instead, we'll compare by name (which should be unique) and also try hash comparison
-    return currentWeaponsList.some(weapon => {
-        // Compare as strings first (for exact matches)
-        if (String(weapon.hash) === String(weaponHash)) {
-            return true;
-        }
-        // Compare as numbers if both can be converted
-        const weaponHashNum = typeof weapon.hash === 'string' ? parseInt(weapon.hash) : weapon.hash;
-        const inputHashNum = typeof weaponHash === 'string' ? parseInt(weaponHash) : weaponHash;
-        if (!isNaN(weaponHashNum) && !isNaN(inputHashNum) && weaponHashNum === inputHashNum) {
-            return true;
-        }
-        // Compare by name (most reliable since names should be unique)
-        if (weaponName && weapon.name) {
-            const existingName = String(weapon.name).toLowerCase().trim();
-            const inputName = String(weaponName).toLowerCase().trim();
-            if (existingName === inputName) {
-                return true;
-            }
-        }
-        // Also check if the hash string matches the weapon name (for OX items)
-        if (weapon.name && String(weapon.name).toLowerCase() === String(weaponHash).toLowerCase()) {
-            return true;
-        }
-        return false;
-    });
-}
-
-function showWeaponSelectionDialog(categories, oxItems) {
-    const dialog = document.getElementById('weapon-select-ui');
-    const content = document.getElementById('weapon-select-content');
-    const title = document.getElementById('weapon-select-title');
-    const errorEl = document.getElementById('weapon-select-error');
-    
-    title.textContent = 'Add Weapon';
-    
-    // Clear any previous errors
+    /**
+     * Show weapon selection dialog
+     */
+    showWeaponSelectionDialog(categories, oxItems) {
+        const menu = MenuManager.get(MENU_IDS.WEAPON_SELECT);
+        if (!menu) return;
+        
+        const content = menu.querySelector('.paintball-dialog') || menu.querySelector('.paintball-menu');
+        const titleEl = menu.querySelector('.paintball-title');
+        const errorEl = menu.querySelector('.error-message') || content.querySelector('.error-message');
+        
+        if (titleEl) titleEl.textContent = 'Add Weapon';
     if (errorEl) {
         errorEl.textContent = '';
         errorEl.style.display = 'none';
     }
     
-    // Clear content but keep error element (it's a child of content)
+        if (!content) return;
+        
+        // Clear content except error
     const children = Array.from(content.children);
     children.forEach(child => {
-        if (child.id !== 'weapon-select-error') {
+            if (child !== errorEl && !child.classList.contains('error-message')) {
             child.remove();
         }
     });
     
-    // Show OX selection by default if available, otherwise manual entry
     if (oxItems.length > 0) {
-        showOXWeaponSelection(categories, oxItems);
+            this.showOXWeaponSelection(content, categories, oxItems, errorEl);
     } else {
-        // Create tabs for manual entry vs OX selection
-        const tabContainer = document.createElement('div');
-        tabContainer.style.display = 'flex';
-        tabContainer.style.gap = '8px';
-        tabContainer.style.marginBottom = '16px';
-        
-        const manualTab = document.createElement('button');
-        manualTab.className = 'btn-primary';
-        manualTab.style.flex = '1';
-        manualTab.textContent = 'Manual Entry';
-        manualTab.addEventListener('click', () => {
-            showManualWeaponEntry(categories);
-        });
-        
-        const oxTab = document.createElement('button');
-        oxTab.className = 'btn-secondary';
-        oxTab.style.flex = '1';
-        oxTab.textContent = 'OX Items (0)';
-        oxTab.disabled = true;
-        
-        tabContainer.appendChild(manualTab);
-        tabContainer.appendChild(oxTab);
-        content.appendChild(tabContainer);
-        
-        showManualWeaponEntry(categories);
-    }
-    
-    showMenu('weapon-select-ui');
-}
-
-function showManualWeaponEntry(categories) {
-    const content = document.getElementById('weapon-select-content');
-    const errorEl = document.getElementById('weapon-select-error');
-    
-    // Clear any previous errors
-    if (errorEl) {
-        errorEl.textContent = '';
-        errorEl.style.display = 'none';
-    }
-    
-    // Clear existing content except tabs and error element
-    const tabs = content.querySelector('div:first-of-type');
-    const children = Array.from(content.children);
-    children.forEach(child => {
-        if (child.id !== 'weapon-select-error' && child !== tabs) {
-            child.remove();
+            this.showManualWeaponEntry(content, categories, errorEl);
         }
-    });
-    if (tabs && !content.contains(tabs)) {
-        content.insertBefore(tabs, errorEl?.nextSibling || null);
-    }
-    
-    const hashInput = document.createElement('input');
-    hashInput.type = 'text';
-    hashInput.className = 'dialog-input';
-    hashInput.placeholder = 'Enter weapon hash (e.g., WEAPON_PISTOL or PISTOL)';
-    hashInput.style.marginBottom = '12px';
-    
-    const nameInput = document.createElement('input');
-    nameInput.type = 'text';
-    nameInput.className = 'dialog-input';
-    nameInput.placeholder = 'Enter weapon name (e.g., Pistol)';
-    nameInput.style.marginBottom = '16px';
+        
+        // Clear navigation flag when weapon selection dialog is shown (navigation complete)
+        MenuManager.isNavigating = false;
+        MenuManager.show(MENU_IDS.WEAPON_SELECT);
+    },
+
+    /**
+     * Show manual weapon entry
+     */
+    showManualWeaponEntry(content, categories, errorEl) {
+        const hashInput = Components.createInput('Enter weapon hash (e.g., WEAPON_PISTOL or PISTOL)', {
+            style: { marginBottom: '12px' },
+        });
+        const nameInput = Components.createInput('Enter weapon name (e.g., Pistol)', {
+            style: { marginBottom: '16px' },
+        });
     
     const buttonContainer = document.createElement('div');
     buttonContainer.className = 'dialog-buttons';
     
-    const submitBtn = document.createElement('button');
-    submitBtn.className = 'btn-primary';
-    submitBtn.textContent = 'Continue';
-    submitBtn.addEventListener('click', () => {
+        const submitBtn = Components.createButton('Continue', () => {
         const hash = hashInput.value.trim();
         const name = nameInput.value.trim();
         
         if (!hash) {
-            showError('Weapon hash is required');
+                Components.showError(errorEl, 'Weapon hash is required');
             return;
         }
         if (!name) {
-            showError('Weapon name is required');
+                Components.showError(errorEl, 'Weapon name is required');
             return;
         }
         
-        // Check if weapon already exists
-        if (checkWeaponExists(hash, name)) {
-            const errorEl = document.getElementById('weapon-select-error');
-            if (errorEl) {
-                errorEl.textContent = 'Weapon already exists';
-                errorEl.style.display = 'block';
-                setTimeout(() => {
-                    errorEl.textContent = '';
-                    errorEl.style.display = 'none';
-                }, 5000);
-            }
+            if (this.checkWeaponExists(hash, name)) {
+                Components.showError(errorEl, 'Weapon already exists');
             return;
         }
         
-        pendingWeaponData = { hash, name };
-        hideMenu('weapon-select-ui');
-        showCategorySelectionDialog(categories, handleWeaponCategorySelection);
-    });
-    
-    const cancelBtn = document.createElement('button');
-    cancelBtn.className = 'btn-secondary';
-    cancelBtn.textContent = 'Cancel';
-    cancelBtn.addEventListener('click', () => {
-        hideMenu('weapon-select-ui');
-        fetch(`https://${GetParentResourceName()}/closeMenu`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ menu: 'weapon-select' })
-        });
-    });
+            this.pendingWeaponData = { hash, name };
+            // Navigating to category selection - set navigation flag
+            MenuManager.isNavigating = true;
+            MenuManager.hide(MENU_IDS.WEAPON_SELECT, { checkFocusRelease: false });
+            this.showCategorySelection(categories);
+        }, 'primary');
+        
+        const cancelBtn = Components.createButton('Cancel', () => {
+            // Canceling - navigate back to weapon config
+            MenuManager.isNavigating = true;
+            MenuManager.hide(MENU_IDS.WEAPON_SELECT, { checkFocusRelease: false });
+            // Reopen weapon config menu
+            Utils.sendNuiCallback('refreshWeaponConfig');
+        }, 'secondary');
     
     buttonContainer.appendChild(submitBtn);
     buttonContainer.appendChild(cancelBtn);
@@ -1644,230 +1654,313 @@ function showManualWeaponEntry(categories) {
     content.appendChild(nameInput);
     content.appendChild(buttonContainer);
     
-    setTimeout(() => hashInput.focus(), 100);
-}
+        setTimeout(() => hashInput.focus(), CONFIG.INPUT_FOCUS_DELAY);
+    },
 
-function showOXWeaponSelection(categories, oxItems) {
-    const content = document.getElementById('weapon-select-content');
-    // Clear existing content except tabs
-    const tabs = content.querySelector('div');
-    content.innerHTML = '';
-    if (tabs) content.appendChild(tabs);
-    
-    const searchInput = document.createElement('input');
-    searchInput.type = 'text';
-    searchInput.className = 'dialog-input';
-    searchInput.placeholder = 'Search items...';
-    searchInput.style.marginBottom = '12px';
+    /**
+     * Show OX weapon selection
+     */
+    showOXWeaponSelection(content, categories, oxItems, errorEl) {
+        const searchInput = Components.createInput('Search items...', {
+            style: { marginBottom: '12px' },
+        });
     
     const itemsList = document.createElement('div');
     itemsList.className = 'paintball-menu';
-    itemsList.style.maxHeight = '300px';
-    itemsList.style.overflowY = 'auto';
-    itemsList.style.marginBottom = '16px';
+        itemsList.style.cssText = 'max-height: 300px; overflow-y: auto; margin-bottom: 16px;';
     
     let filteredItems = oxItems;
     
-    function renderItems() {
+        const renderItems = () => {
         itemsList.innerHTML = '';
         filteredItems.forEach(item => {
             const itemName = item.label || item.name;
-            const alreadyExists = checkWeaponExists(item.name, itemName);
+                const alreadyExists = this.checkWeaponExists(item.name, itemName);
             
-            const itemEl = createMenuItem(
+                const itemEl = Components.createMenuItem(
                 item.label || item.name,
                 alreadyExists ? `Item: ${item.name} (Already Added)` : `Item: ${item.name}`,
-                () => {
-                    // Don't allow clicking if already exists
-                    if (alreadyExists) {
-                        return;
+                    alreadyExists ? null : () => {
+                        this.pendingWeaponData = { hash: item.name, name: itemName };
+                        // Navigating to category selection - set navigation flag
+                        MenuManager.isNavigating = true;
+                        MenuManager.hide(MENU_IDS.WEAPON_SELECT, { checkFocusRelease: false });
+                        this.showCategorySelection(categories);
+                    },
+                    {
+                        disabled: alreadyExists,
+                        style: alreadyExists
+                            ? { opacity: '0.5', cursor: 'not-allowed', filter: 'grayscale(100%)', pointerEvents: 'none' }
+                            : {},
                     }
-                    
-                    console.log('OX item clicked:', item.name, 'label:', itemName);
-                    pendingWeaponData = {
-                        hash: item.name,
-                        name: itemName
-                    };
-                    hideMenu('weapon-select-ui');
-                    showCategorySelectionDialog(categories, handleWeaponCategorySelection);
-                }
-            );
-            
-            // Style disabled items
-            if (alreadyExists) {
-                itemEl.style.opacity = '0.5';
-                itemEl.style.cursor = 'not-allowed';
-                itemEl.style.filter = 'grayscale(100%)';
-                itemEl.style.pointerEvents = 'none';
-            }
-            
+                );
             itemsList.appendChild(itemEl);
         });
         
         if (filteredItems.length === 0) {
-            const empty = document.createElement('div');
-            empty.className = 'menu-item';
-            empty.style.textAlign = 'center';
-            empty.style.padding = '20px';
-            empty.textContent = 'No items found';
+                const empty = Components.createMenuItem('No items found', '', null, {
+                    disabled: true,
+                    style: { textAlign: 'center', padding: '20px' },
+                });
             itemsList.appendChild(empty);
         }
-    }
+        };
     
     searchInput.addEventListener('input', (e) => {
         const search = e.target.value.toLowerCase();
-        filteredItems = oxItems.filter(item => 
+            filteredItems = oxItems.filter(
+                item =>
             (item.name && item.name.toLowerCase().includes(search)) ||
             (item.label && item.label.toLowerCase().includes(search))
         );
         renderItems();
     });
     
-    const cancelBtn = document.createElement('button');
-    cancelBtn.className = 'btn-secondary';
-    cancelBtn.style.width = '100%';
-    cancelBtn.textContent = 'Cancel';
-    cancelBtn.addEventListener('click', () => {
-        hideMenu('weapon-select-ui');
-        fetch(`https://${GetParentResourceName()}/closeMenu`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ menu: 'weapon-select' })
-        });
-    });
+        const cancelBtn = Components.createButton('Cancel', () => {
+            // Canceling - navigate back to weapon config
+            MenuManager.isNavigating = true;
+            MenuManager.hide(MENU_IDS.WEAPON_SELECT, { checkFocusRelease: false });
+            // Reopen weapon config menu
+            Utils.sendNuiCallback('refreshWeaponConfig');
+        }, 'secondary', { style: { width: '100%' } });
     
     content.appendChild(searchInput);
     content.appendChild(itemsList);
     content.appendChild(cancelBtn);
     
     renderItems();
-    setTimeout(() => searchInput.focus(), 100);
-}
+        setTimeout(() => searchInput.focus(), CONFIG.INPUT_FOCUS_DELAY);
+    },
 
-function handleWeaponCategorySelection(selectedCategory) {
-    if (selectedCategory && pendingWeaponData) {
-        // Close category selection dialog first
-        hideMenu('category-select-ui');
+    /**
+     * Check if weapon exists
+     */
+    checkWeaponExists(weaponHash, weaponName) {
+        if (!this.currentWeaponsList || this.currentWeaponsList.length === 0) {
+            return false;
+        }
         
-        // Make the request - weapon already validated client-side
-        fetch(`https://${GetParentResourceName()}/addWeapon`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                hash: pendingWeaponData.hash, 
-                name: pendingWeaponData.name, 
-                category: selectedCategory.id 
-            })
-        }).then((response) => {
-            if (response.ok) {
-                // Success - clear pending data and close weapon-select-ui
-                pendingWeaponData = null;
-                hideMenu('weapon-select-ui');
-                // The server will trigger weaponConfigUpdated which will refresh the config menu
-            } else {
-                // Error response - show error inline
-                const errorEl = document.getElementById('weapon-select-error');
-                if (errorEl) {
-                    errorEl.textContent = 'Failed to add weapon. Please try again.';
-                    errorEl.style.display = 'block';
-                    setTimeout(() => {
-                        errorEl.textContent = '';
-                        errorEl.style.display = 'none';
-                    }, 5000);
-                }
-                // Reopen weapon-select-ui to show error
-                showMenu('weapon-select-ui');
+        return this.currentWeaponsList.some(weapon => {
+            if (String(weapon.hash) === String(weaponHash)) return true;
+            const weaponHashNum = typeof weapon.hash === 'string' ? parseInt(weapon.hash) : weapon.hash;
+            const inputHashNum = typeof weaponHash === 'string' ? parseInt(weaponHash) : weaponHash;
+            if (!isNaN(weaponHashNum) && !isNaN(inputHashNum) && weaponHashNum === inputHashNum) return true;
+            if (weaponName && weapon.name) {
+                if (String(weapon.name).toLowerCase().trim() === String(weaponName).toLowerCase().trim()) return true;
             }
-        }).catch(() => {
-            // Network error - show error inline
-            const errorEl = document.getElementById('weapon-select-error');
-            if (errorEl) {
-                errorEl.textContent = 'Network error. Please try again.';
-                errorEl.style.display = 'block';
-                setTimeout(() => {
-                    errorEl.textContent = '';
-                    errorEl.style.display = 'none';
-                }, 5000);
-            }
-            // Reopen weapon-select-ui to show error
-            showMenu('weapon-select-ui');
+            if (weapon.name && String(weapon.name).toLowerCase() === String(weaponHash).toLowerCase()) return true;
+            return false;
         });
-    } else {
-        pendingWeaponData = null;
-    }
-}
+    },
 
-function showCategorySelectionDialog(categories, callback) {
-    const dialog = document.getElementById('category-select-ui');
-    const menu = document.getElementById('category-select-menu');
-    const title = document.getElementById('category-select-title');
-    
-    title.textContent = 'Select Category';
-    menu.innerHTML = '';
+    /**
+     * Show category selection
+     */
+    showCategorySelection(categories) {
+        const content = MenuManager.getContent(MENU_IDS.CATEGORY_SELECT);
+        if (!content) return;
+        
+        content.innerHTML = '';
     
     if (!categories || categories.length === 0) {
-        const empty = document.createElement('div');
-        empty.className = 'menu-item';
-        empty.style.textAlign = 'center';
-        empty.style.padding = '20px';
-        empty.textContent = 'No categories available. Create one first.';
-        menu.appendChild(empty);
+            const empty = Components.createMenuItem('No categories available. Create one first.', '', null, {
+                disabled: true,
+                style: { textAlign: 'center', padding: '20px' },
+            });
+            content.appendChild(empty);
     } else {
         categories.forEach(cat => {
-            const item = createMenuItem(
-                cat.name,
-                `ID: ${cat.id}`,
-                () => {
-                    hideMenu('category-select-ui');
-                    if (callback) callback(cat);
-                }
-            );
-            menu.appendChild(item);
-        });
-    }
-    
-    // Cancel button
-    const cancelItem = createMenuItem(
-        'Cancel',
-        'Cancel adding weapon',
-        () => {
-            hideMenu('category-select-ui');
-            if (callback) callback(null);
-            fetch(`https://${GetParentResourceName()}/closeMenu`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ menu: 'category-select' })
+            const item = Components.createMenuItem(cat.name, `ID: ${cat.id}`, () => {
+                // Selecting category - will add weapon and close, but keep navigation flag for now
+                // The handleCategorySelection will handle closing properly
+                MenuManager.hide(MENU_IDS.CATEGORY_SELECT, { checkFocusRelease: false });
+                this.handleCategorySelection(cat);
             });
-        }
-    );
-    cancelItem.style.borderColor = 'rgba(255, 68, 68, 0.3)';
-    menu.appendChild(cancelItem);
-    
-    showMenu('category-select-ui');
-}
-
-// Escape key handler
-document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && currentMenu) {
-        hideAllMenus();
-        fetch(`https://${GetParentResourceName()}/closeMenu`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ menu: 'all' })
+            content.appendChild(item);
         });
+        }
+        
+        const cancelItem = Components.createMenuItem('Cancel', 'Cancel adding weapon', () => {
+            // Canceling - navigate back to weapon selection
+            MenuManager.isNavigating = true;
+            MenuManager.hide(MENU_IDS.CATEGORY_SELECT, { checkFocusRelease: false });
+            this.pendingWeaponData = null;
+            // Reopen weapon selection dialog
+            this.showWeaponSelectionDialog(categories, []);
+        });
+    cancelItem.style.borderColor = 'rgba(255, 68, 68, 0.3)';
+        content.appendChild(cancelItem);
+        
+        // Clear navigation flag when category selection is shown (navigation complete)
+        MenuManager.isNavigating = false;
+        MenuManager.show(MENU_IDS.CATEGORY_SELECT);
+    },
+
+    /**
+     * Handle category selection
+     */
+    handleCategorySelection(selectedCategory) {
+        if (!selectedCategory || !this.pendingWeaponData) {
+            this.pendingWeaponData = null;
+            return;
+        }
+        
+        Utils.sendNuiCallback('addWeapon', {
+            hash: this.pendingWeaponData.hash,
+            name: this.pendingWeaponData.name,
+            category: selectedCategory.id,
+        }).then(response => {
+            if (response && response.ok !== false) {
+                this.pendingWeaponData = null;
+                // Weapon added successfully - refresh weapon config menu
+                MenuManager.isNavigating = true;
+                MenuManager.hide(MENU_IDS.WEAPON_SELECT, { checkFocusRelease: false });
+                MenuManager.hide(MENU_IDS.CATEGORY_SELECT, { checkFocusRelease: false });
+                // Refresh weapon config to show new weapon
+                Utils.sendNuiCallback('refreshWeaponConfig');
+            } else {
+                const errorEl = MenuManager.get(MENU_IDS.WEAPON_SELECT)?.querySelector('.error-message');
+                Components.showError(errorEl, 'Failed to add weapon. Please try again.');
+                MenuManager.isNavigating = true;
+                MenuManager.show(MENU_IDS.WEAPON_SELECT);
+            }
+        }).catch(() => {
+            const errorEl = MenuManager.get(MENU_IDS.WEAPON_SELECT)?.querySelector('.error-message');
+            Components.showError(errorEl, 'Network error. Please try again.');
+            MenuManager.isNavigating = true;
+            MenuManager.show(MENU_IDS.WEAPON_SELECT);
+        });
+    },
+
+    pendingWeaponData: null,
+};
+
+// ============================================================================
+// MESSAGE HANDLER
+// ============================================================================
+window.addEventListener('message', function(event) {
+    const data = event.data;
+    if (!data || !data.action) return;
+    
+    switch (data.action) {
+        case 'showGameModes':
+            MenuHandlers.displayGameModes(data.gameModes);
+            break;
+        case 'showMaps':
+            MenuHandlers.displayMaps(data.maps, {
+                forEditing: data.forEditing || false,
+                forDeleting: data.forDeleting || false,
+            });
+            break;
+        case 'showAdminMatches':
+            MenuHandlers.displayAdminMatches(data.matches);
+            break;
+        case 'showEditorMainMenu':
+            MenuHandlers.displayEditorMainMenu();
+            break;
+        case 'showEditorMenu':
+            // Clear navigation flag before showing editor menu (client manages focus explicitly)
+            MenuManager.isNavigating = false;
+            MenuHandlers.displayEditorMenu(data.menuData);
+            break;
+        case 'showTeamMenu':
+            MenuHandlers.displayTeamMenu();
+            break;
+        case 'showDialog':
+            // If showing dialog for map name (during save), keep navigation flag
+            // Otherwise, clear it (dialog is standalone)
+            if (data.dialogType !== 'mapName') {
+                MenuManager.isNavigating = false;
+            }
+            DialogManager.showDialog(data.title, data.placeholder, (value) => {
+                Utils.sendNuiCallback('dialogSubmit', { value, type: data.dialogType });
+            });
+            break;
+        case 'hideMenu':
+            if (data.menu) {
+                // Client sends menu IDs like 'main', 'gamemode', etc. (without '-ui')
+                // Our menu IDs are stored the same way, so use directly
+                // When client requests hide, it's usually for navigation - set flag and don't release focus
+                // The client will handle focus management when showing the next menu
+                // BUT: if the client is managing focus explicitly (like clearMap/saveMap for editor menu, or dialog),
+                // we should clear the navigation flag so the client's focus management works properly
+                const isEditorMenu = data.menu === MENU_IDS.EDITOR;
+                const isDialog = data.menu === MENU_IDS.DIALOG;
+                if (isEditorMenu || isDialog) {
+                    // Client manages focus explicitly for editor menu (clearMap/saveMap) and dialog (map name)
+                    // Clear navigation flag immediately and force immediate hide (no animation delay)
+                    // This ensures menu is fully hidden before client sets focus to false
+                    MenuManager.isNavigating = false;
+                    const menu = MenuManager.get(data.menu);
+                    if (menu) {
+                        // Force immediate hide - remove active class and add hidden class immediately
+                        menu.classList.remove('active');
+                        menu.classList.add('hidden');
+                        if (MenuManager.currentMenu === data.menu) {
+                            MenuManager.currentMenu = null;
+                        }
+                    }
+                } else {
+                    // For other menus, set navigation flag (client will show next menu)
+                    MenuManager.isNavigating = true;
+                    MenuManager.hide(data.menu, { checkFocusRelease: false });
+                }
+            } else {
+                // If no menu specified, hide all (this is a true close, release focus)
+                MenuManager.isNavigating = false;
+                MenuManager.hideAll();
+            }
+            break;
+        case 'showPressE':
+            PressEUIManager.show(data.x, data.y, data.text, data.opacity);
+            break;
+        case 'hidePressE':
+            PressEUIManager.hide();
+            break;
+        case 'showMainMenu':
+            MenuHandlers.displayMainMenu(data.hasMatch || false, data.inMatch || false, data.canStartMatch || false);
+            break;
+        case 'showMatchSettings':
+            MenuHandlers.displayMatchSettings(data.gameModeId, data.mapId);
+            break;
+        case 'showMatchBrowser':
+            MenuHandlers.displayMatchBrowser(data.matches, data.myMatchId);
+            break;
+        case 'showWeaponSelection':
+            MenuHandlers.displayWeaponSelection(data.categories, data.weapons, data.forMatch);
+            break;
+        case 'showWeaponConfig':
+            const weaponSelectUI = MenuManager.get(MENU_IDS.WEAPON_SELECT);
+            if (weaponSelectUI && weaponSelectUI.getAttribute('data-error-open') === 'true') {
+                break;
+            }
+            const categories = data.categories || data.Categories || [];
+            const weapons = data.weapons || data.Weapons || [];
+            // Clear navigation flag when weapon config is shown (navigation complete)
+            MenuManager.isNavigating = false;
+            WeaponConfigManager.displayWeaponConfig(categories, weapons);
+            MenuManager.show(MENU_IDS.WEAPON_CONFIG);
+            break;
+        case 'showError':
+            DialogManager.showError(data.message || 'An error occurred');
+            break;
     }
 });
+
+// ============================================================================
+// INITIALIZATION
+// ============================================================================
+function init() {
+    MenuManager.init();
+    PressEUIManager.init();
 
 // Notify NUI ready
 function notifyNUIReady() {
     try {
-        const resourceName = GetParentResourceName();
-        fetch(`https://${resourceName}/nuiReady`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ready: true })
-        }).catch(() => {});
-    } catch (err) {}
+            Utils.sendNuiCallback('nuiReady', { ready: true });
+        } catch (err) {
+            // Ignore
+        }
 }
 
 if (typeof GetParentResourceName === 'function') {
@@ -1877,6 +1970,13 @@ if (typeof GetParentResourceName === 'function') {
         if (typeof GetParentResourceName === 'function') {
             notifyNUIReady();
         }
-    }, 500);
+        }, CONFIG.NUI_READY_RETRY_DELAY);
+    }
 }
 
+// Initialize when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+} else {
+    init();
+}
