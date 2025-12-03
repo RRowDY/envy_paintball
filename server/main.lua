@@ -374,6 +374,69 @@ end
 -- MATCH MANAGEMENT
 -- ============================================================================
 
+-- Update scoreboard for all players in match
+local function UpdateScoreboard(match)
+    if not match or match.status ~= "active" then return end
+    
+    local gameModeId = match.gameMode.id
+    local gameModeName = match.gameMode.name or "Scoreboard"
+    
+    -- Build scoreboard data
+    local scoreboardData = {
+        gameModeId = gameModeId,
+        gameModeName = gameModeName,
+        players = {},
+        teamScores = {}
+    }
+    
+    -- Get player data with scores
+    for _, playerId in ipairs(match.players) do
+        local xPlayer = ESX.GetPlayerFromId(playerId)
+        if xPlayer then
+            local playerName = xPlayer.getName()
+            local playerScore = match.playerScores[playerId] or 0
+            local playerKills = match.playerKills[playerId] or 0
+            local playerDeaths = match.playerDeaths[playerId] or 0
+            local playerTeam = nil
+            
+            -- Get player's team if in team mode
+            if match.gameMode.teams > 0 then
+                playerTeam = GetPlayerTeam(match, playerId)
+            end
+            
+            table.insert(scoreboardData.players, {
+                id = playerId,
+                name = playerName,
+                score = playerScore,
+                kills = playerKills,
+                deaths = playerDeaths,
+                team = playerTeam
+            })
+        end
+    end
+    
+    -- Get team scores for team-based modes (TDM and 2v2)
+    if gameModeId == "tdm" then
+        -- TDM: Use stored team scores
+        for i = 1, match.gameMode.teams do
+            scoreboardData.teamScores[i] = match.teamScores[i] or 0
+        end
+        -- Debug: Print team scores being sent
+        print(string.format("[Scoreboard Update] TDM - Team 1: %d, Team 2: %d", scoreboardData.teamScores[1] or 0, scoreboardData.teamScores[2] or 0))
+    elseif gameModeId == "2v2_ramps" then
+        -- 2v2: Use stored team scores (same as TDM)
+        for i = 1, match.gameMode.teams do
+            scoreboardData.teamScores[i] = match.teamScores[i] or 0
+        end
+    end
+    -- 1v1 and FFA: No team scores, only individual player scores
+    
+    -- Send to all players in match
+    for _, playerId in ipairs(match.players) do
+        TriggerClientEvent('envy_paintball:updateScoreboard', playerId, scoreboardData)
+    end
+end
+
 function StartMatch(matchId)
     local match = activeMatches[matchId]
     if not match then return end
@@ -382,12 +445,16 @@ function StartMatch(matchId)
     
     -- Initialize scoring
     match.playerScores = {}
+    match.playerKills = {}
+    match.playerDeaths = {}
     match.teamScores = {}
     match.deadPlayers = {}
     
-    -- Initialize player scores
+    -- Initialize player scores, kills, and deaths
     for _, playerId in ipairs(match.players) do
         match.playerScores[playerId] = 0
+        match.playerKills[playerId] = 0
+        match.playerDeaths[playerId] = 0
     end
     
     -- Initialize team scores
@@ -396,6 +463,9 @@ function StartMatch(matchId)
             match.teamScores[i] = 0
         end
     end
+    
+    -- Update scoreboard for all players
+    UpdateScoreboard(match)
 
     -- Set routing buckets
     for _, playerId in ipairs(match.players) do
@@ -1098,7 +1168,15 @@ RegisterNetEvent('envy_paintball:joinMatch', function(matchId, pin)
     if not match.playerScores then
         match.playerScores = {}
     end
+    if not match.playerKills then
+        match.playerKills = {}
+    end
+    if not match.playerDeaths then
+        match.playerDeaths = {}
+    end
     match.playerScores[source] = 0
+    match.playerKills[source] = 0
+    match.playerDeaths[source] = 0
 
     -- If match is active, teleport and give weapon
     if match.status == "active" then
@@ -1642,12 +1720,24 @@ RegisterNetEvent('esx:onPlayerDeath', function(data)
     -- Award points
     local gameModeId = match.gameMode.id
     
+    -- Track kills and deaths
+    if not match.playerKills then match.playerKills = {} end
+    if not match.playerDeaths then match.playerDeaths = {} end
+    if not match.playerKills[killerServerId] then match.playerKills[killerServerId] = 0 end
+    if not match.playerDeaths[victimId] then match.playerDeaths[victimId] = 0 end
+    
+    match.playerKills[killerServerId] = match.playerKills[killerServerId] + 1
+    match.playerDeaths[victimId] = match.playerDeaths[victimId] + 1
+    
     if gameModeId == "ffa" then
         -- FFA: Award point to killer
         if not match.playerScores[killerServerId] then
             match.playerScores[killerServerId] = 0
         end
         match.playerScores[killerServerId] = match.playerScores[killerServerId] + Config.PointsPerKill
+        
+        -- Update scoreboard
+        UpdateScoreboard(match)
         
         -- Notify players
         local xPlayer = ESX.GetPlayerFromId(killerServerId)
@@ -1664,6 +1754,9 @@ RegisterNetEvent('esx:onPlayerDeath', function(data)
             end
             match.teamScores[killerTeam] = match.teamScores[killerTeam] + Config.PointsPerKill
             
+            -- Update scoreboard
+            UpdateScoreboard(match)
+            
             -- Notify players
             for _, playerId in ipairs(match.players) do
                 local team1Score = match.teamScores[1] or 0
@@ -1672,12 +1765,33 @@ RegisterNetEvent('esx:onPlayerDeath', function(data)
             end
         end
         
-    elseif gameModeId == "1v1_ramps" or gameModeId == "2v2_ramps" then
-        -- 1v1/2v2: Award point to killer
+    elseif gameModeId == "1v1_ramps" then
+        -- 1v1: Award point to killer (kills/deaths already tracked above)
         if not match.playerScores[killerServerId] then
             match.playerScores[killerServerId] = 0
         end
         match.playerScores[killerServerId] = match.playerScores[killerServerId] + Config.PointsPerKill
+        
+        -- Update scoreboard
+        UpdateScoreboard(match)
+        
+    elseif gameModeId == "2v2_ramps" then
+        -- 2v2: Award point to killer and update team score (kills/deaths already tracked above)
+        if not match.playerScores[killerServerId] then
+            match.playerScores[killerServerId] = 0
+        end
+        match.playerScores[killerServerId] = match.playerScores[killerServerId] + Config.PointsPerKill
+        
+        -- Also update team score for 2v2
+        if killerTeam then
+            if not match.teamScores[killerTeam] then
+                match.teamScores[killerTeam] = 0
+            end
+            match.teamScores[killerTeam] = match.teamScores[killerTeam] + Config.PointsPerKill
+        end
+        
+        -- Update scoreboard
+        UpdateScoreboard(match)
         
         -- Notify players
         local xPlayer = ESX.GetPlayerFromId(killerServerId)
@@ -1773,6 +1887,16 @@ RegisterNetEvent('envy_paintball:spawnProtectionEnded', function()
     for _, playerId in ipairs(match.players) do
         TriggerClientEvent('envy_paintball:updateGhostedPlayers', playerId, ghostedPlayers)
     end
+end)
+
+-- Handle scoreboard request
+RegisterNetEvent('envy_paintball:requestScoreboard', function()
+    local source = source
+    local match, matchId = GetPlayerMatch(source)
+    if not match or match.status ~= "active" then return end
+    
+    -- Send current scoreboard data to requesting player
+    UpdateScoreboard(match)
 end)
 
 -- ============================================================================

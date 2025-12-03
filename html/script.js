@@ -653,22 +653,56 @@ const ScoreboardManager = {
         if (this.bodyElement) {
             this.bodyElement.innerHTML = '';
             
-            if (scoreData.gameModeId === 'tdm') {
-                // TDM: Show team scores
-                this.bodyElement.innerHTML = `
-                    <div class="scoreboard-team-header">Team 1</div>
-                    <div class="scoreboard-item team-item">
-                        <span class="scoreboard-item-name">Team 1</span>
-                        <span class="scoreboard-item-score">${scoreData.teamScores[1] || 0}</span>
-                    </div>
-                    <div class="scoreboard-team-header">Team 2</div>
-                    <div class="scoreboard-item team-item">
-                        <span class="scoreboard-item-name">Team 2</span>
-                        <span class="scoreboard-item-score">${scoreData.teamScores[2] || 0}</span>
-                    </div>
-                `;
+            // Check if this is a team-based mode (has team scores)
+            const hasTeamScores = scoreData.teamScores && Object.keys(scoreData.teamScores).length > 0;
+            
+            if (hasTeamScores) {
+                // Team-based mode: Show players grouped by team with individual kills/deaths and team totals
+                const players = scoreData.players || [];
+                let teamScoresHTML = '';
+                
+                // Group players by team
+                const playersByTeam = {};
+                players.forEach(player => {
+                    if (player.team) {
+                        if (!playersByTeam[player.team]) {
+                            playersByTeam[player.team] = [];
+                        }
+                        playersByTeam[player.team].push(player);
+                    }
+                });
+                
+                // Sort teams by team number
+                const teamNumbers = Object.keys(playersByTeam).map(Number).sort((a, b) => a - b);
+                
+                teamNumbers.forEach(teamNum => {
+                    const teamPlayers = playersByTeam[teamNum];
+                    // Lua arrays are 1-indexed, but JSON arrays are 0-indexed in JavaScript
+                    // So team 1 is at index 0, team 2 is at index 1, etc.
+                    const teamScore = scoreData.teamScores[teamNum - 1] || 0;
+                    
+                    // Team header with total score
+                    teamScoresHTML += `
+                        <div class="scoreboard-team-header">Team ${teamNum} - Total: ${teamScore}</div>
+                    `;
+                    
+                    // Sort players by kills (descending)
+                    const sortedPlayers = [...teamPlayers].sort((a, b) => (b.kills || 0) - (a.kills || 0));
+                    
+                    // Show each player in the team with their kills/deaths
+                    sortedPlayers.forEach(player => {
+                        teamScoresHTML += `
+                            <div class="scoreboard-item">
+                                <span class="scoreboard-item-name">${this.escapeHtml(player.name || 'Unknown')}</span>
+                                <span class="scoreboard-item-score">${player.kills || 0}K / ${player.deaths || 0}D</span>
+                            </div>
+                        `;
+                    });
+                });
+                
+                this.bodyElement.innerHTML = teamScoresHTML;
             } else {
-                // FFA/1v1/2v2: Show individual player scores
+                // FFA/1v1: Show individual player scores with kills/deaths
                 const players = scoreData.players || [];
                 // Sort by score (descending)
                 const sortedPlayers = [...players].sort((a, b) => (b.score || 0) - (a.score || 0));
@@ -682,7 +716,7 @@ const ScoreboardManager = {
                     }
                     item.innerHTML = `
                         <span class="scoreboard-item-name">${this.escapeHtml(player.name || 'Unknown')}</span>
-                        <span class="scoreboard-item-score">${player.score || 0}</span>
+                        <span class="scoreboard-item-score">${player.kills || 0}K / ${player.deaths || 0}D</span>
                     `;
                     this.bodyElement.appendChild(item);
                 });
@@ -2686,7 +2720,10 @@ window.addEventListener('message', function(event) {
             MenuHandlers.displayAdminDashboard(data);
             break;
         case 'updateScoreboard':
-            ScoreboardManager.show(data);
+            ScoreboardManager.show(data.data || data);
+            break;
+        case 'showScoreboard':
+            ScoreboardManager.show(data.data || data);
             break;
         case 'hideScoreboard':
             ScoreboardManager.hide();

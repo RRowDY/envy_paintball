@@ -909,6 +909,63 @@ RegisterNetEvent('envy_paintball:matchActive', function(matchData)
     ESX.ShowNotification("Match started! Good luck!", "success")
 end)
 
+-- Scoreboard toggle state
+local scoreboardVisible = false
+local scoreboardData = nil
+
+-- Update scoreboard data
+RegisterNetEvent('envy_paintball:updateScoreboard', function(data)
+    if not inMatch then return end
+    
+    -- Store scoreboard data
+    scoreboardData = data
+    
+    -- Update scoreboard UI if visible (no focus, just display)
+    if scoreboardVisible then
+        SendNUIMessage({
+            action = 'updateScoreboard',
+            data = data
+        })
+    end
+end)
+
+-- Toggle scoreboard with G key (hold)
+CreateThread(function()
+    while true do
+        Wait(0)
+        if inMatch then
+            if IsControlPressed(0, 47) then -- G key (hold)
+                if not scoreboardVisible then
+                    -- Request scoreboard data from server if we don't have it
+                    if not scoreboardData then
+                        TriggerServerEvent('envy_paintball:requestScoreboard')
+                    else
+                        -- Show scoreboard with existing data
+                        SendNUIMessage({
+                            action = 'updateScoreboard',
+                            data = scoreboardData
+                        })
+                    end
+                    scoreboardVisible = true
+                end
+            else
+                if scoreboardVisible then
+                    -- Hide scoreboard when G is released
+                    SendNUIMessage({ action = 'hideScoreboard' })
+                    scoreboardVisible = false
+                end
+            end
+        else
+            -- Hide scoreboard when not in match
+            if scoreboardVisible then
+                SendNUIMessage({ action = 'hideScoreboard' })
+                scoreboardVisible = false
+            end
+            scoreboardData = nil
+        end
+    end
+end)
+
 RegisterNetEvent('envy_paintball:matchEnded', function()
     inMatch = false
     myMatchId = nil
@@ -918,6 +975,10 @@ RegisterNetEvent('envy_paintball:matchEnded', function()
     LocalPlayer.state:set('invBusy', false, true)
     paintballWeaponHash = nil
     weaponGiven = false
+    
+    -- Hide scoreboard
+    scoreboardVisible = false
+    SendNUIMessage({ action = 'hideScoreboard' })
     
     local ped = PlayerPedId()
     
