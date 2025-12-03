@@ -347,6 +347,8 @@ function EndMatch(matchId, reason)
     local match = activeMatches[matchId]
     if not match then return end
 
+    -- Store original status before changing it
+    local wasActive = match.status == "active"
     match.status = "ended"
     
     -- Remove weapons
@@ -362,7 +364,12 @@ function EndMatch(matchId, reason)
         SetPlayerRoutingBucket(playerId, 0)
         playerMatches[playerId] = nil
         playerCoords[playerId] = nil
-        TriggerClientEvent('envy_paintball:teleportToPed', playerId, Config.PedLocation.coords)
+        
+        -- Only teleport to PED if match was ACTIVE when closed
+        if wasActive then
+            TriggerClientEvent('envy_paintball:teleportToPed', playerId, Config.PedLocation.coords)
+        end
+        
         TriggerClientEvent('envy_paintball:matchEnded', playerId)
         TriggerClientEvent('ESX:Notify', playerId, "info", 5000, string.format("Match ended: %s", reason))
     end
@@ -916,7 +923,7 @@ RegisterNetEvent('envy_paintball:adminCloseMatch', function(matchId)
     end
     
     EndMatch(matchId, "Match closed by administrator")
-    TriggerClientEvent('ESX:Notify', source, "success", 5000, "Match closed successfully")
+    -- Removed duplicate notification - EndMatch already notifies all players including admin if they're in the match
 end)
 
 RegisterNetEvent('envy_paintball:updateWeaponConfig', function(type, id, enabled)
@@ -1068,7 +1075,7 @@ CreateThread(function()
                     if distance > Config.MaxDistanceFromPed then
                         if match.host == playerId then
                             EndMatch(matchId, "Host went too far from the paintball area")
-                            TriggerClientEvent('ESX:Notify', playerId, "error", 5000, "You went too far from the paintball area. Your match has been closed.")
+                            -- Removed duplicate notification - EndMatch already notifies the player
                         else
                             RemovePlayerFromMatch(playerId, matchId, "You went too far from the paintball area. You have been removed from the match.")
                         end

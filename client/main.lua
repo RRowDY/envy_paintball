@@ -811,7 +811,7 @@ RegisterNetEvent('envy_paintball:matchEnded', function()
     -- Destroy boundary zone
     destroyBoundaryZone()
     
-    ESX.ShowNotification("Match ended!", "info")
+    -- Removed duplicate notification - server already sends notification with reason via EndMatch
 end)
 
 RegisterNetEvent('envy_paintball:matchJoined', function(matchData)
