@@ -61,29 +61,29 @@ const Utils = {
      * Parse GTA color codes to HTML
      */
     parseColorCodes(text) {
-        if (!text) return '';
-        
-        const colorMap = {
-            '~r~': '<span style="color: #ff4444;">',
-            '~g~': '<span style="color: #44ff44;">',
-            '~b~': '<span style="color: #00ffff;">',
-            '~y~': '<span style="color: #ffff44;">',
-            '~p~': '<span style="color: #ff44ff;">',
-            '~c~': '<span style="color: #cccccc;">',
-            '~m~': '<span style="color: #888888;">',
-            '~u~': '<span style="color: #FFFFFF;">',
-            '~o~': '<span style="color: #ff8844;">',
-            '~eb~': '<span style="color: #0987ff;">',
-            '~s~': '</span>',
+    if (!text) return '';
+    
+    const colorMap = {
+        '~r~': '<span style="color: #ff4444;">',
+        '~g~': '<span style="color: #44ff44;">',
+        '~b~': '<span style="color: #00ffff;">',
+        '~y~': '<span style="color: #ffff44;">',
+        '~p~': '<span style="color: #ff44ff;">',
+        '~c~': '<span style="color: #cccccc;">',
+        '~m~': '<span style="color: #888888;">',
+        '~u~': '<span style="color: #FFFFFF;">',
+        '~o~': '<span style="color: #ff8844;">',
+        '~eb~': '<span style="color: #0987ff;">',
+        '~s~': '</span>',
             '~w~': '</span>',
-        };
-        
-        let htmlText = text;
-        for (const [code, replacement] of Object.entries(colorMap)) {
-            htmlText = htmlText.replace(new RegExp(code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), replacement);
-        }
-        
-        return htmlText;
+    };
+    
+    let htmlText = text;
+    for (const [code, replacement] of Object.entries(colorMap)) {
+        htmlText = htmlText.replace(new RegExp(code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), replacement);
+    }
+    
+    return htmlText;
     },
 
     /**
@@ -109,6 +109,8 @@ const MenuManager = {
     currentMenu: null,
     menus: new Map(),
     templates: new Map(),
+    focusReleaseScheduled: false, // Prevent multiple focus release calls
+    isNavigating: false, // Track when we're navigating between menus (don't release focus)
 
     /**
      * Initialize menu system
@@ -263,15 +265,67 @@ const MenuManager = {
 
     /**
      * Show a menu
+     * @param {string} menuId - The menu ID to show
+     * @param {Object} options - Options for showing the menu
+     * @param {string} options.title - Optional title override
+     * @param {boolean} options.keepOpen - If true, don't close other menus (for dialogs that should stack)
      */
     show(menuId, options = {}) {
         const menu = this.menus.get(menuId);
         if (!menu) return;
 
+        // Define which menus can stack (dialogs that should appear over other menus)
+        // These are typically confirmation dialogs, error messages, or input dialogs
+        const stackableMenus = [
+            MENU_IDS.CONFIRM,
+            MENU_IDS.ERROR,
+            MENU_IDS.DIALOG,
+            MENU_IDS.PIN,
+            MENU_IDS.CATEGORY_SELECT,
+            MENU_IDS.WEAPON_SELECT,
+        ];
+
+        // Close other menus unless this is a stackable menu or explicitly told to keep open
+        const shouldCloseOthers = !options.keepOpen && !stackableMenus.includes(menuId);
+        
+        if (shouldCloseOthers) {
+            // Close all other menus (including stackable ones) when opening a regular menu
+            // Don't check focus release - we're opening a new menu, so focus should stay
+            this.menus.forEach((otherMenu, otherMenuId) => {
+                if (otherMenuId !== menuId && otherMenu.classList.contains('active')) {
+                    // Check for special error flag on weapon-select
+                    if (otherMenuId === MENU_IDS.WEAPON_SELECT && otherMenu.getAttribute('data-error-open') === 'true') {
+                        // Don't close if error is being displayed
+                        return;
+                    }
+                    this.hide(otherMenuId, { checkFocusRelease: false });
+                }
+            });
+        } else if (stackableMenus.includes(menuId)) {
+            // If opening a stackable menu, only close other stackable menus (not regular menus)
+            // Don't check focus release - we're opening a new menu, so focus should stay
+            this.menus.forEach((otherMenu, otherMenuId) => {
+                if (otherMenuId !== menuId && 
+                    otherMenu.classList.contains('active') && 
+                    stackableMenus.includes(otherMenuId)) {
+                    // Don't close weapon-select if it has an error flag
+                    if (otherMenuId === MENU_IDS.WEAPON_SELECT && otherMenu.getAttribute('data-error-open') === 'true') {
+                        return;
+                    }
+                    this.hide(otherMenuId, { checkFocusRelease: false });
+                }
+            });
+        }
+
         // Update title if provided
         if (options.title && menu._titleEl) {
             menu._titleEl.textContent = options.title;
         }
+
+        // Reset focus release flag when showing a menu (menu is being opened)
+        this.focusReleaseScheduled = false;
+        // Clear navigation flag when menu is shown (navigation complete)
+        this.isNavigating = false;
 
         menu.classList.remove('hidden');
         menu.classList.add('active');
@@ -288,8 +342,11 @@ const MenuManager = {
 
     /**
      * Hide a menu
+     * @param {string} menuId - The menu ID to hide
+     * @param {Object} options - Options for hiding
+     * @param {boolean} options.checkFocusRelease - If true, check and release focus if all menus closed (default: true)
      */
-    hide(menuId) {
+    hide(menuId, options = {}) {
         const menu = this.menus.get(menuId);
         if (!menu) return;
 
@@ -298,34 +355,106 @@ const MenuManager = {
             return;
         }
 
-        menu.classList.remove('active');
-        setTimeout(() => {
-            menu.classList.add('hidden');
-        }, CONFIG.MENU_ANIMATION_DELAY);
+        const shouldCheckFocus = options.checkFocusRelease !== false; // Default to true
 
+        menu.classList.remove('active');
+        
         if (this.currentMenu === menuId) {
             this.currentMenu = null;
         }
+        
+        // Check immediately if all menus are closed (before animation)
+        const allClosed = shouldCheckFocus && this.areAllMenusClosed();
+        
+        setTimeout(() => {
+            menu.classList.add('hidden');
+            
+            // Check again after animation completes, but only if focus wasn't already released
+            if (shouldCheckFocus && !this.focusReleaseScheduled && this.areAllMenusClosed()) {
+                this.releaseFocus();
+            }
+        }, CONFIG.MENU_ANIMATION_DELAY);
+        
+        // If all menus are now closed, release focus immediately
+        if (allClosed && !this.focusReleaseScheduled) {
+            this.releaseFocus();
+        }
+    },
+    
+    /**
+     * Check if all menus are closed
+     */
+    areAllMenusClosed() {
+        let hasOpenMenu = false;
+        this.menus.forEach((menu, menuId) => {
+            // Check both 'active' class and currentMenu state
+            if (menu.classList.contains('active')) {
+                hasOpenMenu = true;
+            }
+        });
+        return !hasOpenMenu && this.currentMenu === null;
+    },
+    
+    /**
+     * Release NUI focus (cursor)
+     */
+    releaseFocus() {
+        // Don't release focus if we're navigating between menus
+        if (this.isNavigating) {
+            return;
+        }
+        
+        if (this.focusReleaseScheduled) {
+            return; // Already scheduled
+        }
+        
+        this.focusReleaseScheduled = true;
+        Utils.sendNuiCallback('closeMenu', { menu: 'all' });
+        
+        // Reset flag after a short delay to allow for future releases
+        setTimeout(() => {
+            this.focusReleaseScheduled = false;
+        }, 100);
     },
 
     /**
      * Close menu and notify client
      */
     close(menuId) {
+        // Explicit close (via close button) - clear navigation flag and release focus
+        this.isNavigating = false;
         this.hide(menuId);
         Utils.sendNuiCallback('closeMenu', { menu: menuId });
     },
 
     /**
      * Hide all menus
+     * @param {boolean} force - If true, force close even menus with error flags
      */
-    hideAll() {
+    hideAll(force = false) {
+        // Explicit close all - clear navigation flag
+        this.isNavigating = false;
+        
         this.menus.forEach((menu, menuId) => {
-            if (menuId !== MENU_IDS.WEAPON_SELECT || menu.getAttribute('data-error-open') !== 'true') {
-                this.hide(menuId);
+            // Check for error flag unless forcing
+            if (force || menuId !== MENU_IDS.WEAPON_SELECT || menu.getAttribute('data-error-open') !== 'true') {
+                // Remove active class immediately
+                menu.classList.remove('active');
             }
         });
         this.currentMenu = null;
+        
+        // Release cursor immediately when hiding all menus
+        this.releaseFocus();
+        
+        // Complete the hide animation after focus is released
+        setTimeout(() => {
+            this.menus.forEach((menu, menuId) => {
+                if (force || menuId !== MENU_IDS.WEAPON_SELECT || menu.getAttribute('data-error-open') !== 'true') {
+                    menu.classList.add('hidden');
+                }
+            });
+        }, CONFIG.MENU_ANIMATION_DELAY);
     },
 
     /**
@@ -350,6 +479,8 @@ const MenuManager = {
         // Escape key handler
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape' && this.currentMenu) {
+                // Escape key - explicit close, clear navigation flag
+                this.isNavigating = false;
                 this.hideAll();
                 Utils.sendNuiCallback('closeMenu', { menu: 'all' });
             }
@@ -380,7 +511,7 @@ const Components = {
         
         const titleEl = document.createElement('div');
         titleEl.className = 'menu-item-title';
-        titleEl.textContent = title;
+    titleEl.textContent = title;
         
         item.appendChild(titleEl);
         
@@ -511,7 +642,12 @@ const MenuHandlers = {
             const item = Components.createMenuItem(
                 mode.name,
                 `Players: ${mode.minPlayers}-${mode.maxPlayers}`,
-                () => Utils.sendNuiCallback('selectGameMode', { gameModeId: mode.id })
+                () => {
+                    // Navigating to map selection - set navigation flag
+                    MenuManager.isNavigating = true;
+                    MenuManager.hide(MENU_IDS.GAMEMODE, { checkFocusRelease: false });
+                    Utils.sendNuiCallback('selectGameMode', { gameModeId: mode.id });
+                }
             );
             content.appendChild(item);
         });
@@ -536,7 +672,7 @@ const MenuHandlers = {
                 { disabled: true, style: { cursor: 'default', opacity: '0.6' } }
             );
             content.appendChild(item);
-        } else {
+                } else {
             maps.forEach(map => {
                 const item = Components.createMenuItem(
                     map.name,
@@ -551,8 +687,14 @@ const MenuHandlers = {
                                 }
                             );
                         } else if (options.forEditing) {
+                            // Loading map for edit - closes UI, release focus
+                            MenuManager.isNavigating = false;
+                            MenuManager.hide(MENU_IDS.MAP);
                             Utils.sendNuiCallback('loadMapForEdit', { mapId: map.id });
                         } else {
+                            // Selecting map for match - navigating to match settings
+                            MenuManager.isNavigating = true;
+                            MenuManager.hide(MENU_IDS.MAP, { checkFocusRelease: false });
                             Utils.sendNuiCallback('selectMap', { mapId: map.id });
                         }
                     }
@@ -572,77 +714,85 @@ const MenuHandlers = {
         if (!content) return;
         
         content.innerHTML = '';
-        
-        const items = [
-            {
-                title: 'Create Match',
-                description: 'Start a new paintball match',
-                onClick: () => {
-                    if (hasMatch) {
-                        DialogManager.showConfirm(
-                            'You already have a match created. Do you want to close it and create a new one?',
-                            () => {
-                                MenuManager.hide(MENU_IDS.CONFIRM);
-                                Utils.sendNuiCallback('closeMatch').then(() => {
-                                    MenuManager.hide(MENU_IDS.MAIN);
-                                    Utils.sendNuiCallback('mainAction', { action: 'create' });
-                                });
-                            }
-                        );
-                    } else {
-                        MenuManager.hide(MENU_IDS.MAIN);
-                        Utils.sendNuiCallback('mainAction', { action: 'create' });
-                    }
-                },
+    
+    const items = [
+        {
+            title: 'Create Match',
+            description: 'Start a new paintball match',
+            onClick: () => {
+                if (hasMatch) {
+                    DialogManager.showConfirm(
+                        'You already have a match created. Do you want to close it and create a new one?',
+                        () => {
+                            MenuManager.hide(MENU_IDS.CONFIRM);
+                            Utils.sendNuiCallback('closeMatch').then(() => {
+                                // Only hide main menu, don't release focus - we're navigating to game mode selection
+                                MenuManager.isNavigating = true;
+                                MenuManager.hide(MENU_IDS.MAIN, { checkFocusRelease: false });
+                                // Navigate to game mode selection - this is intentional navigation
+                                Utils.sendNuiCallback('mainAction', { action: 'create' });
+                            });
+                        }
+                    );
+                } else {
+                    // Only hide main menu, don't release focus - we're navigating to game mode selection
+                    MenuManager.isNavigating = true;
+                    MenuManager.hide(MENU_IDS.MAIN, { checkFocusRelease: false });
+                    // Navigate to game mode selection - this is intentional navigation
+                    Utils.sendNuiCallback('mainAction', { action: 'create' });
+                }
             },
-            {
-                title: 'Browse Matches',
-                description: 'View and join active matches',
-                onClick: () => {
-                    MenuManager.hide(MENU_IDS.MAIN);
-                    Utils.sendNuiCallback('mainAction', { action: 'browse' });
-                },
+        },
+        {
+            title: 'Browse Matches',
+            description: 'View and join active matches',
+            onClick: () => {
+                // Only hide main menu, don't release focus - we're navigating to match browser
+                MenuManager.isNavigating = true;
+                MenuManager.hide(MENU_IDS.MAIN, { checkFocusRelease: false });
+                Utils.sendNuiCallback('mainAction', { action: 'browse' });
+            },
             },
         ];
         
-        if (canStartMatch) {
-            items.push({
-                title: 'Start Match',
-                description: 'Start the match now',
-                onClick: () => {
-                    MenuManager.hide(MENU_IDS.MAIN);
+    if (canStartMatch) {
+        items.push({
+            title: 'Start Match',
+            description: 'Start the match now',
+            onClick: () => {
+                    MenuManager.hideAll();
                     Utils.sendNuiCallback('startMatch');
+                    // UI will stay closed - match is starting
                 },
             });
         }
         
-        if (inMatch) {
-            items.push({
-                title: 'Select Weapon',
-                description: 'Choose your weapon for this match',
-                onClick: () => {
-                    MenuManager.hide(MENU_IDS.MAIN);
-                    Utils.sendNuiCallback('selectWeapon');
-                },
-            });
-        }
+    if (inMatch) {
+        items.push({
+            title: 'Select Weapon',
+            description: 'Choose your weapon for this match',
+            onClick: () => {
+                // Navigating to weapon selection - set navigation flag
+                MenuManager.isNavigating = true;
+                MenuManager.hide(MENU_IDS.MAIN, { checkFocusRelease: false });
+                Utils.sendNuiCallback('selectWeapon');
+            },
+        });
+    }
         
-        if (hasMatch) {
-            items.push({
-                title: 'Close Match',
-                description: 'Close your current match',
-                onClick: () => {
-                    MenuManager.hide(MENU_IDS.MAIN);
-                    Utils.sendNuiCallback('closeMatch').then(() => {
-                        setTimeout(() => {
-                            Utils.sendNuiCallback('mainAction', { action: 'refresh' });
-                        }, 500);
-                    });
+    if (hasMatch) {
+        items.push({
+            title: 'Close Match',
+            description: 'Close your current match',
+            onClick: () => {
+                    MenuManager.hideAll();
+                    Utils.sendNuiCallback('closeMatch');
+                    // Don't refresh/reopen - user explicitly closed the match
                 },
-            });
-        }
-        
-        items.forEach(item => {
+        });
+    }
+    
+    items.forEach(item => {
             content.appendChild(Components.createMenuItem(item.title, item.description, item.onClick));
         });
         
@@ -657,26 +807,26 @@ const MenuHandlers = {
         if (!content) return;
         
         content.innerHTML = '';
-        
-        if (!matches || matches.length === 0) {
+    
+    if (!matches || matches.length === 0) {
             const empty = Components.createMenuItem('No active matches', '', null, { disabled: true });
-            empty.style.textAlign = 'center';
-            empty.style.padding = '20px';
+        empty.style.textAlign = 'center';
+        empty.style.padding = '20px';
             content.appendChild(empty);
-        } else {
-            matches.forEach(match => {
-                const statusText = match.status === 'waiting' ? 'Waiting' : match.status === 'active' ? 'In Progress' : 'Ended';
-                const statusColor = match.status === 'waiting' ? '#44ff44' : match.status === 'active' ? '#ff8844' : '#888888';
-                const privacyText = match.isPrivate ? '🔒 Private' : '🌐 Public';
-                const isMyMatch = myMatchId && match.id === myMatchId;
-                
+    } else {
+        matches.forEach(match => {
+            const statusText = match.status === 'waiting' ? 'Waiting' : match.status === 'active' ? 'In Progress' : 'Ended';
+            const statusColor = match.status === 'waiting' ? '#44ff44' : match.status === 'active' ? '#ff8844' : '#888888';
+            const privacyText = match.isPrivate ? '🔒 Private' : '🌐 Public';
+            const isMyMatch = myMatchId && match.id === myMatchId;
+            
                 const item = Components.createMenuItem(
                     `${match.gameMode} - ${match.map}`,
                     `${privacyText} | Players: ${match.players}/${match.maxPlayers}`,
                     isMyMatch || (match.status === 'active' && !match.allowJoinInProgress) ? null : () => {
-                        if (match.isPrivate) {
+                    if (match.isPrivate) {
                             DialogManager.showPIN(match.id);
-                        } else {
+                    } else {
                             MatchManager.joinMatch(match.id, null);
                         }
                     },
@@ -710,25 +860,25 @@ const MenuHandlers = {
         if (!content) return;
         
         content.innerHTML = '';
-        
-        // Group weapons by category
-        const weaponsByCategory = {};
-        categories.forEach(cat => {
-            if (cat.enabled) {
+    
+    // Group weapons by category
+    const weaponsByCategory = {};
+    categories.forEach(cat => {
+        if (cat.enabled) {
                 weaponsByCategory[cat.id] = { category: cat, weapons: [] };
-            }
-        });
+        }
+    });
+    
+    weapons.forEach(weapon => {
+        if (weapon.enabled && weaponsByCategory[weapon.category]) {
+            weaponsByCategory[weapon.category].weapons.push(weapon);
+        }
+    });
+    
+    // Display by category
+    Object.values(weaponsByCategory).forEach(catData => {
+        if (catData.weapons.length === 0) return;
         
-        weapons.forEach(weapon => {
-            if (weapon.enabled && weaponsByCategory[weapon.category]) {
-                weaponsByCategory[weapon.category].weapons.push(weapon);
-            }
-        });
-        
-        // Display by category
-        Object.values(weaponsByCategory).forEach(catData => {
-            if (catData.weapons.length === 0) return;
-            
             const categoryHeader = Components.createMenuItem(
                 catData.category.name,
                 '',
@@ -736,24 +886,26 @@ const MenuHandlers = {
                 { style: { background: 'rgba(9, 135, 255, 0.2)', cursor: 'default', fontWeight: '600' } }
             );
             content.appendChild(categoryHeader);
-            
-            catData.weapons.forEach(weapon => {
-                const item = Components.createMenuItem(
-                    weapon.name,
-                    `Select ${weapon.name} for this match`,
-                    () => {
-                        if (forMatch) {
-                            MenuManager.hide(MENU_IDS.WEAPON);
-                            Utils.sendNuiCallback('setPlayerWeapon', { weaponHash: weapon.hash }).then(() => {
-                                Utils.sendNuiCallback('closeMenu', { menu: MENU_IDS.WEAPON });
-                            });
-                        }
-                    }
-                );
-                content.appendChild(item);
-            });
-        });
         
+        catData.weapons.forEach(weapon => {
+            const item = Components.createMenuItem(
+                weapon.name,
+                `Select ${weapon.name} for this match`,
+                () => {
+                    if (forMatch) {
+                        // Selecting weapon closes UI - release focus
+                        MenuManager.isNavigating = false;
+                        MenuManager.hideAll();
+                        Utils.sendNuiCallback('setPlayerWeapon', { weaponHash: weapon.hash });
+                    }
+                }
+            );
+            content.appendChild(item);
+        });
+    });
+    
+        // Clear navigation flag when weapon selection is shown (navigation complete)
+        MenuManager.isNavigating = false;
         MenuManager.show(MENU_IDS.WEAPON);
     },
 
@@ -769,8 +921,8 @@ const MenuHandlers = {
         MatchManager.selectedData = { gameModeId, mapId };
         
         const privateOption = Components.createMenuItem(
-            'Create Private Match',
-            'Require a PIN to join',
+        'Create Private Match',
+        'Require a PIN to join',
             () => DialogManager.showPINInput((pin) => MatchManager.createMatch(true, pin))
         );
         
@@ -806,7 +958,16 @@ const MenuHandlers = {
                 itemData.description,
                 () => {
                     if (['createNewMap', 'editMap', 'deleteMap'].includes(itemData.action)) {
-                        MenuManager.hide(MENU_IDS.EDITOR_MAIN);
+                        // "Edit Map" and "Delete Map" navigate to maps menu - set navigation flag
+                        // "Create New Map" closes UI to start editor - don't set navigation flag
+                        if (itemData.action === 'editMap' || itemData.action === 'deleteMap') {
+                            MenuManager.isNavigating = true;
+                            MenuManager.hide(MENU_IDS.EDITOR_MAIN, { checkFocusRelease: false });
+                        } else {
+                            // Create New Map - closes UI, release focus
+                            MenuManager.isNavigating = false;
+                            MenuManager.hide(MENU_IDS.EDITOR_MAIN);
+                        }
                     }
                     Utils.sendNuiCallback('editorMainAction', { action: itemData.action });
                 }
@@ -848,11 +1009,34 @@ const MenuHandlers = {
             const item = Components.createMenuItem(
                 itemData.title,
                 itemData.description,
-                () => Utils.sendNuiCallback('editorAction', { action: itemData.action })
+                () => {
+                    // Actions that navigate to other menus
+                    if (itemData.action === 'addSpawn') {
+                        // Navigating to team selection
+                        MenuManager.isNavigating = true;
+                        MenuManager.hide(MENU_IDS.EDITOR, { checkFocusRelease: false });
+                    } else if (itemData.action === 'clearMap') {
+                        // Clear Map closes UI completely - release focus
+                        MenuManager.isNavigating = false;
+                        MenuManager.hideAll();
+                    } else if (itemData.action === 'saveMap') {
+                        // Client will handle focus management for saveMap
+                        // Just hide the menu - don't set navigation flag here
+                        // The client will send hideMenu and manage focus explicitly
+                        MenuManager.hide(MENU_IDS.EDITOR, { checkFocusRelease: false });
+                    } else {
+                        // Actions that close UI (setCenter, leaveEditor)
+                        MenuManager.isNavigating = false;
+                        MenuManager.hide(MENU_IDS.EDITOR);
+                    }
+                    Utils.sendNuiCallback('editorAction', { action: itemData.action });
+                }
             );
             content.appendChild(item);
         });
         
+        // Clear navigation flag when editor menu is shown (navigation complete)
+        MenuManager.isNavigating = false;
         MenuManager.show(MENU_IDS.EDITOR);
     },
 
@@ -875,7 +1059,12 @@ const MenuHandlers = {
             const item = Components.createMenuItem(
                 team.title,
                 team.value ? `Assign spawn to ${team.title}` : 'Free for all spawn point',
-                () => Utils.sendNuiCallback('selectTeam', { team: team.value })
+                () => {
+                    // Selecting team closes UI to start placing spawn - release focus
+                    MenuManager.isNavigating = false;
+                    MenuManager.hide(MENU_IDS.TEAM);
+                    Utils.sendNuiCallback('selectTeam', { team: team.value });
+                }
             );
             content.appendChild(item);
         });
@@ -908,16 +1097,15 @@ const MenuHandlers = {
                 const item = Components.createMenuItem(
                     `${match.gameMode} - ${match.map}`,
                     `Status: ${statusText} | Players: ${match.players}/${match.maxPlayers} | Bucket: ${match.bucket}`,
-                    () => {
+        () => {
                         DialogManager.showConfirm(
                             `Are you sure you want to close this match?\n\nGame Mode: ${match.gameMode}\nMap: ${match.map}\nPlayers: ${match.players}/${match.maxPlayers}`,
                             () => {
                                 MenuManager.hide(MENU_IDS.CONFIRM);
-                                Utils.sendNuiCallback('adminCloseMatch', { matchId: match.id }).then(() => {
-                                    setTimeout(() => {
-                                        Utils.sendNuiCallback('refreshWeaponConfig');
-                                    }, 500);
-                                });
+                                // Admin close match refreshes the same menu - keep focus, don't release
+                                MenuManager.isNavigating = true;
+                                Utils.sendNuiCallback('adminCloseMatch', { matchId: match.id });
+                                // Client will refresh the admin matches menu automatically
                             }
                         );
                     }
@@ -986,10 +1174,16 @@ const DialogManager = {
             if (value) {
                 callback(value);
             }
-            MenuManager.hide(MENU_IDS.DIALOG);
+            // Client will handle focus management after dialog submit
+            // Clear navigation flag so UI doesn't interfere
+            MenuManager.isNavigating = false;
+            MenuManager.hide(MENU_IDS.DIALOG, { checkFocusRelease: false });
         };
         
         const cancelHandler = () => {
+            // Canceling dialog - clear navigation flag and release focus
+            // Client won't reopen any menu when dialog is cancelled
+            MenuManager.isNavigating = false;
             MenuManager.hide(MENU_IDS.DIALOG);
         };
         
@@ -1019,11 +1213,11 @@ const DialogManager = {
         const dialogContent = menu.querySelector('.paintball-dialog');
         
         input.value = '';
-        if (errorEl) {
-            errorEl.textContent = '';
-            errorEl.style.display = 'none';
-        }
-        
+    if (errorEl) {
+        errorEl.textContent = '';
+        errorEl.style.display = 'none';
+    }
+    
         if (!menu.contains(input)) {
             dialogContent.insertBefore(input, errorEl?.nextSibling || null);
         }
@@ -1038,25 +1232,25 @@ const DialogManager = {
         }
         
         buttonContainer.innerHTML = '';
-        
-        const submitHandler = () => {
-            const pin = input.value.trim();
-            if (pin) {
+    
+    const submitHandler = () => {
+        const pin = input.value.trim();
+        if (pin) {
                 MatchManager.joinMatch(matchId, pin);
-            }
-        };
-        
-        const cancelHandler = () => {
+        }
+    };
+    
+    const cancelHandler = () => {
             MenuManager.hide(MENU_IDS.PIN);
-        };
-        
-        const enterHandler = (e) => {
+    };
+    
+    const enterHandler = (e) => {
             if (e.key === 'Enter') submitHandler();
-        };
-        
-        submitBtn.addEventListener('click', submitHandler);
-        cancelBtn.addEventListener('click', cancelHandler);
-        input.addEventListener('keypress', enterHandler);
+    };
+    
+    submitBtn.addEventListener('click', submitHandler);
+    cancelBtn.addEventListener('click', cancelHandler);
+    input.addEventListener('keypress', enterHandler);
         
         buttonContainer.appendChild(submitBtn);
         buttonContainer.appendChild(cancelBtn);
@@ -1077,7 +1271,7 @@ const DialogManager = {
                     errorEl.style.display = 'none';
                 }
                 callback(pin);
-            } else {
+        } else {
                 Components.showError(errorEl, 'PIN must be 4-6 digits');
                 setTimeout(() => this.showPINInput(callback), 100);
             }
@@ -1143,8 +1337,8 @@ const DialogManager = {
         
         if (errorEl) {
             Components.showError(errorEl, message);
-            return;
-        }
+        return;
+    }
         
         // Fallback to popup
         const menu = MenuManager.get(MENU_IDS.ERROR);
@@ -1189,6 +1383,9 @@ const MatchManager = {
             DialogManager.showError('Missing game mode or map selection. Please try again.');
             return;
         }
+        
+        // Close all menus - match creation will be handled server-side
+        MenuManager.hideAll();
         
         Utils.sendNuiCallback('createMatch', {
             gameModeId: this.selectedData.gameModeId,
@@ -1239,15 +1436,15 @@ const WeaponConfigManager = {
             style: { background: 'rgba(9, 135, 255, 0.3)', cursor: 'default', fontWeight: '600', marginTop: '16px' },
         });
         content.appendChild(catHeader);
-        
-        if (categories.length === 0) {
+    
+    if (categories.length === 0) {
             const emptyMsg = Components.createMenuItem('No categories found', '', null, {
                 disabled: true,
                 style: { opacity: '0.6', cursor: 'default' },
             });
             content.appendChild(emptyMsg);
-        } else {
-            categories.forEach(cat => {
+    } else {
+        categories.forEach(cat => {
                 const item = Components.createMenuItem(
                     cat.name,
                     `ID: ${cat.id} ${cat.enabled ? '(Enabled)' : '(Disabled)'}`,
@@ -1255,41 +1452,41 @@ const WeaponConfigManager = {
                     { style: { cursor: 'default', opacity: cat.enabled ? '1.0' : '0.6' } }
                 );
                 content.appendChild(item);
-            });
-        }
-        
-        // Weapons section
+        });
+    }
+    
+    // Weapons section
         const wepHeader = Components.createMenuItem('Weapons', '', null, {
             style: { background: 'rgba(9, 135, 255, 0.3)', cursor: 'default', fontWeight: '600', marginTop: '16px' },
         });
         content.appendChild(wepHeader);
-        
-        if (weapons.length === 0) {
+    
+    if (weapons.length === 0) {
             const emptyMsg = Components.createMenuItem('No weapons yet', '', null, {
                 disabled: true,
                 style: { opacity: '0.6', cursor: 'default' },
             });
             content.appendChild(emptyMsg);
-        } else {
-            weapons.forEach(weapon => {
-                const item = document.createElement('div');
-                item.className = 'menu-item';
+    } else {
+        weapons.forEach(weapon => {
+            const item = document.createElement('div');
+            item.className = 'menu-item';
                 item.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
-                
-                const left = document.createElement('div');
-                left.innerHTML = `<div style="font-weight: 600;">${weapon.name}</div><div style="font-size: 11px; color: #888;">${weapon.category} | Hash: ${weapon.hash}</div>`;
-                
-                const right = document.createElement('div');
+            
+            const left = document.createElement('div');
+            left.innerHTML = `<div style="font-weight: 600;">${weapon.name}</div><div style="font-size: 11px; color: #888;">${weapon.category} | Hash: ${weapon.hash}</div>`;
+            
+            const right = document.createElement('div');
                 right.style.cssText = 'display: flex; gap: 8px; align-items: center;';
                 
                 const toggle = Components.createButton(
                     weapon.enabled ? 'Enabled' : 'Disabled',
                     (e) => {
-                        e.stopPropagation();
-                        const newState = !weapon.enabled;
-                        weapon.enabled = newState;
-                        toggle.textContent = newState ? 'Enabled' : 'Disabled';
-                        toggle.className = newState ? 'btn-primary' : 'btn-secondary';
+                e.stopPropagation();
+                const newState = !weapon.enabled;
+                weapon.enabled = newState;
+                toggle.textContent = newState ? 'Enabled' : 'Disabled';
+                toggle.className = newState ? 'btn-primary' : 'btn-secondary';
                         Utils.sendNuiCallback('updateWeaponConfig', {
                             type: 'weapon',
                             hash: weapon.hash,
@@ -1303,16 +1500,16 @@ const WeaponConfigManager = {
                 const removeBtn = Components.createButton(
                     'Remove',
                     (e) => {
-                        e.stopPropagation();
+                e.stopPropagation();
                         DialogManager.showConfirm(
-                            `Are you sure you want to remove weapon "${weapon.name}"?`,
-                            () => {
+                    `Are you sure you want to remove weapon "${weapon.name}"?`,
+                    () => {
                                 MenuManager.hide(MENU_IDS.CONFIRM);
                                 Utils.sendNuiCallback('removeWeapon', { hash: weapon.hash }).then(() => {
-                                    setTimeout(() => {
+                            setTimeout(() => {
                                         Utils.sendNuiCallback('refreshWeaponConfig');
-                                    }, 300);
-                                });
+                            }, 300);
+                        });
                             }
                         );
                     },
@@ -1327,12 +1524,12 @@ const WeaponConfigManager = {
                         },
                     }
                 );
-                
-                right.appendChild(toggle);
-                right.appendChild(removeBtn);
-                
-                item.appendChild(left);
-                item.appendChild(right);
+            
+            right.appendChild(toggle);
+            right.appendChild(removeBtn);
+            
+            item.appendChild(left);
+            item.appendChild(right);
                 content.appendChild(item);
             });
         }
@@ -1344,21 +1541,23 @@ const WeaponConfigManager = {
      * Show add weapon dialog
      */
     showAddWeaponDialog(categories) {
-        MenuManager.hide(MENU_IDS.WEAPON_CONFIG);
+        // Navigating to weapon selection dialog - set navigation flag
+        MenuManager.isNavigating = true;
+        MenuManager.hide(MENU_IDS.WEAPON_CONFIG, { checkFocusRelease: false });
         
         fetch(`https://${Utils.getResourceName()}/getOXItems`, {
-            method: 'POST',
+        method: 'POST',
             headers: { 'Content-Type': 'application/json' },
         })
             .then(response => response.json())
-            .then(data => {
-                const weaponItems = (data.items || []).filter(item => {
-                    const itemName = item.name || '';
-                    return itemName.toLowerCase().startsWith('weapon_');
-                });
+    .then(data => {
+        const weaponItems = (data.items || []).filter(item => {
+            const itemName = item.name || '';
+            return itemName.toLowerCase().startsWith('weapon_');
+        });
                 this.showWeaponSelectionDialog(categories, weaponItems);
-            })
-            .catch(() => {
+    })
+    .catch(() => {
                 this.showWeaponSelectionDialog(categories, []);
             });
     },
@@ -1375,27 +1574,29 @@ const WeaponConfigManager = {
         const errorEl = menu.querySelector('.error-message') || content.querySelector('.error-message');
         
         if (titleEl) titleEl.textContent = 'Add Weapon';
-        if (errorEl) {
-            errorEl.textContent = '';
-            errorEl.style.display = 'none';
-        }
-        
+    if (errorEl) {
+        errorEl.textContent = '';
+        errorEl.style.display = 'none';
+    }
+    
         if (!content) return;
         
         // Clear content except error
-        const children = Array.from(content.children);
-        children.forEach(child => {
+    const children = Array.from(content.children);
+    children.forEach(child => {
             if (child !== errorEl && !child.classList.contains('error-message')) {
-                child.remove();
-            }
-        });
-        
-        if (oxItems.length > 0) {
+            child.remove();
+        }
+    });
+    
+    if (oxItems.length > 0) {
             this.showOXWeaponSelection(content, categories, oxItems, errorEl);
-        } else {
+    } else {
             this.showManualWeaponEntry(content, categories, errorEl);
         }
         
+        // Clear navigation flag when weapon selection dialog is shown (navigation complete)
+        MenuManager.isNavigating = false;
         MenuManager.show(MENU_IDS.WEAPON_SELECT);
     },
 
@@ -1409,45 +1610,50 @@ const WeaponConfigManager = {
         const nameInput = Components.createInput('Enter weapon name (e.g., Pistol)', {
             style: { marginBottom: '16px' },
         });
-        
-        const buttonContainer = document.createElement('div');
-        buttonContainer.className = 'dialog-buttons';
-        
+    
+    const buttonContainer = document.createElement('div');
+    buttonContainer.className = 'dialog-buttons';
+    
         const submitBtn = Components.createButton('Continue', () => {
-            const hash = hashInput.value.trim();
-            const name = nameInput.value.trim();
-            
-            if (!hash) {
+        const hash = hashInput.value.trim();
+        const name = nameInput.value.trim();
+        
+        if (!hash) {
                 Components.showError(errorEl, 'Weapon hash is required');
-                return;
-            }
-            if (!name) {
+            return;
+        }
+        if (!name) {
                 Components.showError(errorEl, 'Weapon name is required');
-                return;
-            }
-            
+            return;
+        }
+        
             if (this.checkWeaponExists(hash, name)) {
                 Components.showError(errorEl, 'Weapon already exists');
-                return;
-            }
-            
+            return;
+        }
+        
             this.pendingWeaponData = { hash, name };
-            MenuManager.hide(MENU_IDS.WEAPON_SELECT);
+            // Navigating to category selection - set navigation flag
+            MenuManager.isNavigating = true;
+            MenuManager.hide(MENU_IDS.WEAPON_SELECT, { checkFocusRelease: false });
             this.showCategorySelection(categories);
         }, 'primary');
         
         const cancelBtn = Components.createButton('Cancel', () => {
-            MenuManager.hide(MENU_IDS.WEAPON_SELECT);
-            Utils.sendNuiCallback('closeMenu', { menu: MENU_IDS.WEAPON_SELECT });
+            // Canceling - navigate back to weapon config
+            MenuManager.isNavigating = true;
+            MenuManager.hide(MENU_IDS.WEAPON_SELECT, { checkFocusRelease: false });
+            // Reopen weapon config menu
+            Utils.sendNuiCallback('refreshWeaponConfig');
         }, 'secondary');
-        
-        buttonContainer.appendChild(submitBtn);
-        buttonContainer.appendChild(cancelBtn);
-        
-        content.appendChild(hashInput);
-        content.appendChild(nameInput);
-        content.appendChild(buttonContainer);
-        
+    
+    buttonContainer.appendChild(submitBtn);
+    buttonContainer.appendChild(cancelBtn);
+    
+    content.appendChild(hashInput);
+    content.appendChild(nameInput);
+    content.appendChild(buttonContainer);
+    
         setTimeout(() => hashInput.focus(), CONFIG.INPUT_FOCUS_DELAY);
     },
 
@@ -1458,25 +1664,27 @@ const WeaponConfigManager = {
         const searchInput = Components.createInput('Search items...', {
             style: { marginBottom: '12px' },
         });
-        
-        const itemsList = document.createElement('div');
-        itemsList.className = 'paintball-menu';
+    
+    const itemsList = document.createElement('div');
+    itemsList.className = 'paintball-menu';
         itemsList.style.cssText = 'max-height: 300px; overflow-y: auto; margin-bottom: 16px;';
-        
-        let filteredItems = oxItems;
-        
+    
+    let filteredItems = oxItems;
+    
         const renderItems = () => {
-            itemsList.innerHTML = '';
-            filteredItems.forEach(item => {
-                const itemName = item.label || item.name;
+        itemsList.innerHTML = '';
+        filteredItems.forEach(item => {
+            const itemName = item.label || item.name;
                 const alreadyExists = this.checkWeaponExists(item.name, itemName);
-                
+            
                 const itemEl = Components.createMenuItem(
-                    item.label || item.name,
-                    alreadyExists ? `Item: ${item.name} (Already Added)` : `Item: ${item.name}`,
+                item.label || item.name,
+                alreadyExists ? `Item: ${item.name} (Already Added)` : `Item: ${item.name}`,
                     alreadyExists ? null : () => {
                         this.pendingWeaponData = { hash: item.name, name: itemName };
-                        MenuManager.hide(MENU_IDS.WEAPON_SELECT);
+                        // Navigating to category selection - set navigation flag
+                        MenuManager.isNavigating = true;
+                        MenuManager.hide(MENU_IDS.WEAPON_SELECT, { checkFocusRelease: false });
                         this.showCategorySelection(categories);
                     },
                     {
@@ -1486,38 +1694,41 @@ const WeaponConfigManager = {
                             : {},
                     }
                 );
-                itemsList.appendChild(itemEl);
-            });
-            
-            if (filteredItems.length === 0) {
+            itemsList.appendChild(itemEl);
+        });
+        
+        if (filteredItems.length === 0) {
                 const empty = Components.createMenuItem('No items found', '', null, {
                     disabled: true,
                     style: { textAlign: 'center', padding: '20px' },
                 });
-                itemsList.appendChild(empty);
-            }
+            itemsList.appendChild(empty);
+        }
         };
-        
-        searchInput.addEventListener('input', (e) => {
-            const search = e.target.value.toLowerCase();
+    
+    searchInput.addEventListener('input', (e) => {
+        const search = e.target.value.toLowerCase();
             filteredItems = oxItems.filter(
                 item =>
-                    (item.name && item.name.toLowerCase().includes(search)) ||
-                    (item.label && item.label.toLowerCase().includes(search))
-            );
-            renderItems();
-        });
-        
-        const cancelBtn = Components.createButton('Cancel', () => {
-            MenuManager.hide(MENU_IDS.WEAPON_SELECT);
-            Utils.sendNuiCallback('closeMenu', { menu: MENU_IDS.WEAPON_SELECT });
-        }, 'secondary', { style: { width: '100%' } });
-        
-        content.appendChild(searchInput);
-        content.appendChild(itemsList);
-        content.appendChild(cancelBtn);
-        
+            (item.name && item.name.toLowerCase().includes(search)) ||
+            (item.label && item.label.toLowerCase().includes(search))
+        );
         renderItems();
+    });
+    
+        const cancelBtn = Components.createButton('Cancel', () => {
+            // Canceling - navigate back to weapon config
+            MenuManager.isNavigating = true;
+            MenuManager.hide(MENU_IDS.WEAPON_SELECT, { checkFocusRelease: false });
+            // Reopen weapon config menu
+            Utils.sendNuiCallback('refreshWeaponConfig');
+        }, 'secondary', { style: { width: '100%' } });
+    
+    content.appendChild(searchInput);
+    content.appendChild(itemsList);
+    content.appendChild(cancelBtn);
+    
+    renderItems();
         setTimeout(() => searchInput.focus(), CONFIG.INPUT_FOCUS_DELAY);
     },
 
@@ -1550,31 +1761,38 @@ const WeaponConfigManager = {
         if (!content) return;
         
         content.innerHTML = '';
-        
-        if (!categories || categories.length === 0) {
+    
+    if (!categories || categories.length === 0) {
             const empty = Components.createMenuItem('No categories available. Create one first.', '', null, {
                 disabled: true,
                 style: { textAlign: 'center', padding: '20px' },
             });
             content.appendChild(empty);
-        } else {
-            categories.forEach(cat => {
-                const item = Components.createMenuItem(cat.name, `ID: ${cat.id}`, () => {
-                    MenuManager.hide(MENU_IDS.CATEGORY_SELECT);
-                    this.handleCategorySelection(cat);
-                });
-                content.appendChild(item);
+    } else {
+        categories.forEach(cat => {
+            const item = Components.createMenuItem(cat.name, `ID: ${cat.id}`, () => {
+                // Selecting category - will add weapon and close, but keep navigation flag for now
+                // The handleCategorySelection will handle closing properly
+                MenuManager.hide(MENU_IDS.CATEGORY_SELECT, { checkFocusRelease: false });
+                this.handleCategorySelection(cat);
             });
+            content.appendChild(item);
+        });
         }
         
         const cancelItem = Components.createMenuItem('Cancel', 'Cancel adding weapon', () => {
-            MenuManager.hide(MENU_IDS.CATEGORY_SELECT);
+            // Canceling - navigate back to weapon selection
+            MenuManager.isNavigating = true;
+            MenuManager.hide(MENU_IDS.CATEGORY_SELECT, { checkFocusRelease: false });
             this.pendingWeaponData = null;
-            Utils.sendNuiCallback('closeMenu', { menu: MENU_IDS.CATEGORY_SELECT });
+            // Reopen weapon selection dialog
+            this.showWeaponSelectionDialog(categories, []);
         });
-        cancelItem.style.borderColor = 'rgba(255, 68, 68, 0.3)';
+    cancelItem.style.borderColor = 'rgba(255, 68, 68, 0.3)';
         content.appendChild(cancelItem);
         
+        // Clear navigation flag when category selection is shown (navigation complete)
+        MenuManager.isNavigating = false;
         MenuManager.show(MENU_IDS.CATEGORY_SELECT);
     },
 
@@ -1594,15 +1812,22 @@ const WeaponConfigManager = {
         }).then(response => {
             if (response && response.ok !== false) {
                 this.pendingWeaponData = null;
-                MenuManager.hide(MENU_IDS.WEAPON_SELECT);
+                // Weapon added successfully - refresh weapon config menu
+                MenuManager.isNavigating = true;
+                MenuManager.hide(MENU_IDS.WEAPON_SELECT, { checkFocusRelease: false });
+                MenuManager.hide(MENU_IDS.CATEGORY_SELECT, { checkFocusRelease: false });
+                // Refresh weapon config to show new weapon
+                Utils.sendNuiCallback('refreshWeaponConfig');
             } else {
                 const errorEl = MenuManager.get(MENU_IDS.WEAPON_SELECT)?.querySelector('.error-message');
                 Components.showError(errorEl, 'Failed to add weapon. Please try again.');
+                MenuManager.isNavigating = true;
                 MenuManager.show(MENU_IDS.WEAPON_SELECT);
             }
         }).catch(() => {
             const errorEl = MenuManager.get(MENU_IDS.WEAPON_SELECT)?.querySelector('.error-message');
             Components.showError(errorEl, 'Network error. Please try again.');
+            MenuManager.isNavigating = true;
             MenuManager.show(MENU_IDS.WEAPON_SELECT);
         });
     },
@@ -1634,20 +1859,55 @@ window.addEventListener('message', function(event) {
             MenuHandlers.displayEditorMainMenu();
             break;
         case 'showEditorMenu':
+            // Clear navigation flag before showing editor menu (client manages focus explicitly)
+            MenuManager.isNavigating = false;
             MenuHandlers.displayEditorMenu(data.menuData);
             break;
         case 'showTeamMenu':
             MenuHandlers.displayTeamMenu();
             break;
         case 'showDialog':
+            // If showing dialog for map name (during save), keep navigation flag
+            // Otherwise, clear it (dialog is standalone)
+            if (data.dialogType !== 'mapName') {
+                MenuManager.isNavigating = false;
+            }
             DialogManager.showDialog(data.title, data.placeholder, (value) => {
                 Utils.sendNuiCallback('dialogSubmit', { value, type: data.dialogType });
             });
             break;
         case 'hideMenu':
             if (data.menu) {
-                MenuManager.hide(data.menu + '-ui');
+                // Client sends menu IDs like 'main', 'gamemode', etc. (without '-ui')
+                // Our menu IDs are stored the same way, so use directly
+                // When client requests hide, it's usually for navigation - set flag and don't release focus
+                // The client will handle focus management when showing the next menu
+                // BUT: if the client is managing focus explicitly (like clearMap/saveMap for editor menu, or dialog),
+                // we should clear the navigation flag so the client's focus management works properly
+                const isEditorMenu = data.menu === MENU_IDS.EDITOR;
+                const isDialog = data.menu === MENU_IDS.DIALOG;
+                if (isEditorMenu || isDialog) {
+                    // Client manages focus explicitly for editor menu (clearMap/saveMap) and dialog (map name)
+                    // Clear navigation flag immediately and force immediate hide (no animation delay)
+                    // This ensures menu is fully hidden before client sets focus to false
+                    MenuManager.isNavigating = false;
+                    const menu = MenuManager.get(data.menu);
+                    if (menu) {
+                        // Force immediate hide - remove active class and add hidden class immediately
+                        menu.classList.remove('active');
+                        menu.classList.add('hidden');
+                        if (MenuManager.currentMenu === data.menu) {
+                            MenuManager.currentMenu = null;
+                        }
+                    }
+                } else {
+                    // For other menus, set navigation flag (client will show next menu)
+                    MenuManager.isNavigating = true;
+                    MenuManager.hide(data.menu, { checkFocusRelease: false });
+                }
             } else {
+                // If no menu specified, hide all (this is a true close, release focus)
+                MenuManager.isNavigating = false;
                 MenuManager.hideAll();
             }
             break;
@@ -1676,7 +1936,10 @@ window.addEventListener('message', function(event) {
             }
             const categories = data.categories || data.Categories || [];
             const weapons = data.weapons || data.Weapons || [];
+            // Clear navigation flag when weapon config is shown (navigation complete)
+            MenuManager.isNavigating = false;
             WeaponConfigManager.displayWeaponConfig(categories, weapons);
+            MenuManager.show(MENU_IDS.WEAPON_CONFIG);
             break;
         case 'showError':
             DialogManager.showError(data.message || 'An error occurred');
@@ -1690,23 +1953,23 @@ window.addEventListener('message', function(event) {
 function init() {
     MenuManager.init();
     PressEUIManager.init();
-    
-    // Notify NUI ready
-    function notifyNUIReady() {
-        try {
+
+// Notify NUI ready
+function notifyNUIReady() {
+    try {
             Utils.sendNuiCallback('nuiReady', { ready: true });
         } catch (err) {
             // Ignore
         }
-    }
-    
-    if (typeof GetParentResourceName === 'function') {
-        notifyNUIReady();
-    } else {
-        setTimeout(() => {
-            if (typeof GetParentResourceName === 'function') {
-                notifyNUIReady();
-            }
+}
+
+if (typeof GetParentResourceName === 'function') {
+    notifyNUIReady();
+} else {
+    setTimeout(() => {
+        if (typeof GetParentResourceName === 'function') {
+            notifyNUIReady();
+        }
         }, CONFIG.NUI_READY_RETRY_DELAY);
     }
 }

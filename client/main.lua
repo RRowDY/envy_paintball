@@ -1684,10 +1684,8 @@ RegisterNUICallback('editorAction', function(data, cb)
         OpenSpawnTeamMenu()
     elseif action == "clearMap" then
         ClearMapData()
-        SendNUIMessage({ action = 'hideMenu', menu = 'editor' })
+        SendNUIMessage({ action = 'hideMenu' })
         SetNuiFocus(false, false)
-        Wait(100)
-        OpenMapEditorMenu()
     elseif action == "saveMap" then
         SendNUIMessage({ action = 'hideMenu', menu = 'editor' })
         SetNuiFocus(false, false)
