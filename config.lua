@@ -50,7 +50,7 @@ Config.GameModes = {
 
 -- Paintball Weapons Configuration
 -- Categories are defined here (read-only)
--- Weapons are managed in-game via /paintball_weapons command
+-- Weapons are managed in-game via /paintball_admin command
 
 Config.WeaponCategories = {
     { id = "pistols", name = "Pistols", enabled = true },
@@ -75,6 +75,12 @@ Config.BucketIncrement = 1000 -- Increment per game mode
 -- Map Editor Settings (Admin only)
 Config.AdminGroups = {"admin", "owner"} -- ESX job groups that can use map editor
 Config.MapEditorKey = 74 -- H key to toggle map editor
+
+-- License Management
+-- IMPORTANT: Add this ACE permission to your server.cfg for the owner:
+-- add_ace identifier.license:YOUR_LICENSE_HERE envy_paintball.owner allow
+-- The owner license will have full admin access and can manage additional licenses through the dashboard
+-- Additional licenses can be added through the dashboard by the owner and will have admin access
 
 -- Testing Settings
 Config.AllowSoloTesting = true -- Allow admins to start matches with just themselves (bypasses minPlayers requirement)

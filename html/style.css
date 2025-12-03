@@ -166,6 +166,8 @@ div, span, p, h1, h2, h3, h4, h5, h6, label, li, td, th {
     max-width: 500px;
     max-height: 80vh;
     transition: transform var(--transition-smooth), box-shadow var(--transition-normal), border-color var(--transition-normal);
+    display: flex;
+    flex-direction: column;
 }
 
 .paintball-accent-top {
@@ -192,6 +194,13 @@ div, span, p, h1, h2, h3, h4, h5, h6, label, li, td, th {
     display: flex;
     flex-direction: column;
     position: relative;
+    flex: 1;
+    overflow: hidden;
+}
+
+.dashboard-box .paintball-content {
+    height: 100%;
+    min-height: 0;
 }
 
 .paintball-header {
@@ -520,4 +529,95 @@ div, span, p, h1, h2, h3, h4, h5, h6, label, li, td, th {
 
 .w-full {
     width: 100%;
+}
+
+/* ============================================================================
+   ADMIN DASHBOARD
+   ============================================================================ */
+.dashboard-box {
+    min-width: 1000px !important;
+    max-width: 1400px !important;
+    width: 90vw !important;
+    height: 85vh !important;
+    max-height: 85vh !important;
+    display: flex !important;
+    flex-direction: column !important;
+}
+
+.dashboard-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--color-primary-dark);
+    padding: 0 var(--spacing-xxl);
+    background: rgba(9, 135, 255, 0.05);
+}
+
+.dashboard-tab {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: var(--spacing-md) var(--spacing-xl);
+    color: var(--color-text-secondary);
+    font-size: var(--font-size-base);
+    font-weight: 500;
+    font-family: var(--font-family);
+    cursor: pointer;
+    transition: all var(--transition-normal);
+    position: relative;
+}
+
+.dashboard-tab:hover {
+    color: var(--color-text-primary);
+    background: rgba(9, 135, 255, 0.1);
+}
+
+.dashboard-tab.active {
+    color: var(--color-primary);
+    border-bottom-color: var(--color-primary);
+    background: rgba(9, 135, 255, 0.15);
+}
+
+.dashboard-content-wrapper {
+    position: relative;
+    height: calc(85vh - 140px);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+}
+
+.dashboard-tab-content {
+    display: none;
+    padding: var(--spacing-lg);
+    overflow-y: auto;
+    overflow-x: hidden;
+    height: 100%;
+    flex: 1;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.dashboard-tab-content.active {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+}
+
+/* Dashboard scrollbar styling */
+.dashboard-tab-content::-webkit-scrollbar {
+    width: 8px;
+}
+
+.dashboard-tab-content::-webkit-scrollbar-track {
+    background: rgba(20, 20, 20, 0.5);
+    border-radius: 4px;
+}
+
+.dashboard-tab-content::-webkit-scrollbar-thumb {
+    background: var(--color-primary-light);
+    border-radius: 4px;
+}
+
+.dashboard-tab-content::-webkit-scrollbar-thumb:hover {
+    background: rgba(9, 135, 255, 0.7);
 }

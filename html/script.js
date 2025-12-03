@@ -23,13 +23,13 @@ const MENU_IDS = {
     MAIN: 'main',
     BROWSER: 'browser',
     WEAPON: 'weapon',
-    WEAPON_CONFIG: 'weapon-config',
     PIN: 'pin',
     CATEGORY_SELECT: 'category-select',
     WEAPON_SELECT: 'weapon-select',
+    PLAYER_SEARCH: 'player-search',
     ERROR: 'error',
     CONFIRM: 'confirm',
-    ADMIN_MATCHES: 'admin-matches',
+    ADMIN_DASHBOARD: 'admin-dashboard',
 };
 
 // ============================================================================
@@ -142,19 +142,51 @@ const MenuManager = {
             { id: MENU_IDS.MAIN, title: 'Paintball', isDialog: false },
             { id: MENU_IDS.BROWSER, title: 'Active Matches', isDialog: false },
             { id: MENU_IDS.WEAPON, title: 'Select Weapon', isDialog: false },
-            { id: MENU_IDS.WEAPON_CONFIG, title: 'Weapon Configuration', isDialog: false },
-            { id: MENU_IDS.ADMIN_MATCHES, title: 'Active Matches (Admin)', isDialog: false },
+            { id: MENU_IDS.ADMIN_DASHBOARD, title: 'Admin Dashboard', isDialog: false },
             { id: MENU_IDS.DIALOG, title: 'Enter Value', isDialog: true },
             { id: MENU_IDS.PIN, title: 'Enter PIN', isDialog: true },
             { id: MENU_IDS.CATEGORY_SELECT, title: 'Select Category', isDialog: false },
             { id: MENU_IDS.WEAPON_SELECT, title: 'Add Weapon', isDialog: true },
+            { id: MENU_IDS.PLAYER_SEARCH, title: 'Search Players', isDialog: true },
             { id: MENU_IDS.ERROR, title: 'Error', isDialog: true },
             { id: MENU_IDS.CONFIRM, title: 'Confirm', isDialog: true },
         ];
         
         menuConfigs.forEach(config => {
             let menu;
-            if (typeof createMenuElement === 'function' && !config.isDialog) {
+            // Special handling for admin dashboard - must use custom structure
+            if (config.id === MENU_IDS.ADMIN_DASHBOARD) {
+                menu = document.createElement('div');
+                menu.className = 'paintball-ui hidden';
+                menu.id = `${config.id}-ui`;
+                menu.setAttribute('data-menu-id', config.id);
+                    menu.innerHTML = `
+                        <div class="paintball-container">
+                            <div class="paintball-box dashboard-box">
+                                <div class="paintball-accent-top"></div>
+                                <div class="paintball-content">
+                                    <div class="paintball-header">
+                                        <h2 class="paintball-title">${config.title}</h2>
+                                        <button class="paintball-close" type="button" aria-label="Close">×</button>
+                                    </div>
+                                    <div class="dashboard-tabs">
+                                        <button class="dashboard-tab active" data-tab="maps">Maps</button>
+                                        <button class="dashboard-tab" data-tab="weapons">Weapons</button>
+                                        <button class="dashboard-tab" data-tab="matches">Active Matches</button>
+                                        <button class="dashboard-tab" data-tab="licenses">License Management</button>
+                                    </div>
+                                    <div class="dashboard-content-wrapper">
+                                        <div class="dashboard-tab-content active" data-tab-content="maps"></div>
+                                        <div class="dashboard-tab-content" data-tab-content="weapons"></div>
+                                        <div class="dashboard-tab-content" data-tab-content="matches"></div>
+                                        <div class="dashboard-tab-content" data-tab-content="licenses"></div>
+                                    </div>
+                                </div>
+                                <div class="paintball-accent-bottom"></div>
+                            </div>
+                        </div>
+                    `;
+            } else if (typeof createMenuElement === 'function' && !config.isDialog) {
                 menu = createMenuElement(config.id, config.title);
             } else if (typeof createDialogElement === 'function' && config.isDialog) {
                 menu = createDialogElement(config.id, config.title);
@@ -164,6 +196,7 @@ const MenuManager = {
                 menu.className = 'paintball-ui hidden';
                 menu.id = `${config.id}-ui`;
                 menu.setAttribute(config.isDialog ? 'data-dialog-id' : 'data-menu-id', config.id);
+                
                 menu.innerHTML = `
                     <div class="paintball-container">
                         <div class="paintball-box">
@@ -189,17 +222,14 @@ const MenuManager = {
                 const contentEl = menu.querySelector(config.isDialog ? '.paintball-dialog' : '.paintball-menu');
                 const box = menu.querySelector('.paintball-box');
                 
-                // Special width for weapon-config and weapon-select
-                if (config.id === MENU_IDS.WEAPON_CONFIG) {
-                    if (box) {
-                        box.style.minWidth = '600px';
-                        box.style.maxWidth = '800px';
-                    }
-                } else if (config.id === MENU_IDS.WEAPON_SELECT) {
+                // Special width for weapon-select and player-search
+                if (config.id === MENU_IDS.WEAPON_SELECT || config.id === MENU_IDS.PLAYER_SEARCH) {
                     if (box) {
                         box.style.minWidth = '500px';
-                        box.style.maxWidth = '600px';
+                        box.style.maxWidth = '700px';
                     }
+                } else if (config.id === MENU_IDS.ADMIN_DASHBOARD) {
+                    // Dashboard size is handled by CSS class
                 } else if (config.id === MENU_IDS.CONFIRM || config.id === MENU_IDS.ERROR) {
                     if (box) {
                         box.style.minWidth = '400px';
@@ -224,7 +254,17 @@ const MenuManager = {
                 
                 // Attach close handler
                 if (closeBtn) {
-                    closeBtn.addEventListener('click', () => this.close(config.id));
+                    closeBtn.addEventListener('click', () => {
+                        // Special handling for dialogs opened from dashboard - don't release focus if dashboard is open
+                        if (config.id === MENU_IDS.PLAYER_SEARCH || config.id === MENU_IDS.WEAPON_SELECT || config.id === MENU_IDS.CATEGORY_SELECT) {
+                            const dashboardMenu = this.get(MENU_IDS.ADMIN_DASHBOARD);
+                            if (dashboardMenu && dashboardMenu.classList.contains('active')) {
+                                this.hide(config.id, { checkFocusRelease: false });
+                                return;
+                            }
+                        }
+                        this.close(config.id);
+                    });
                 }
                 
                 // Store references
@@ -252,13 +292,11 @@ const MenuManager = {
             [MENU_IDS.MAIN]: 'Paintball',
             [MENU_IDS.BROWSER]: 'Active Matches',
             [MENU_IDS.WEAPON]: 'Select Weapon',
-            [MENU_IDS.WEAPON_CONFIG]: 'Weapon Configuration',
             [MENU_IDS.PIN]: 'Enter PIN',
             [MENU_IDS.CATEGORY_SELECT]: 'Select Category',
             [MENU_IDS.WEAPON_SELECT]: 'Add Weapon',
             [MENU_IDS.ERROR]: 'Error',
             [MENU_IDS.CONFIRM]: 'Confirm',
-            [MENU_IDS.ADMIN_MATCHES]: 'Active Matches (Admin)',
         };
         return titles[menuId] || 'Menu';
     },
@@ -283,6 +321,7 @@ const MenuManager = {
             MENU_IDS.PIN,
             MENU_IDS.CATEGORY_SELECT,
             MENU_IDS.WEAPON_SELECT,
+            MENU_IDS.PLAYER_SEARCH,
         ];
 
         // Close other menus unless this is a stackable menu or explicitly told to keep open
@@ -1072,15 +1111,377 @@ const MenuHandlers = {
         MenuManager.show(MENU_IDS.TEAM);
     },
 
+
     /**
-     * Display admin matches
+     * Display admin dashboard
      */
-    displayAdminMatches(matches) {
-        const content = MenuManager.getContent(MENU_IDS.ADMIN_MATCHES);
-        if (!content) return;
+    displayAdminDashboard(data) {
+        const menu = MenuManager.get(MENU_IDS.ADMIN_DASHBOARD);
+        if (!menu) {
+            console.error('Dashboard menu not found');
+            return;
+        }
+
+        // Store current data for refresh (preserve isOwner status)
+        menu._dashboardData = data || {};
+        // Ensure isOwner is always preserved and explicitly set as boolean
+        if (data) {
+            // Convert truthy values (1, "true", true) to boolean true
+            menu._dashboardData.isOwner = !!(data.isOwner === true || data.isOwner === 1 || data.isOwner === 'true' || data.isOwner);
+        }
+
+        // Setup tab switching (only if not already set up)
+        const tabs = menu.querySelectorAll('.dashboard-tab');
+        const tabContents = menu.querySelectorAll('.dashboard-tab-content');
         
+        if (tabs.length === 0 || tabContents.length === 0) {
+            console.error('Dashboard tabs or content not found', { 
+                tabs: tabs.length, 
+                contents: tabContents.length,
+                menuHTML: menu.innerHTML.substring(0, 500)
+            });
+            // Try to recreate the dashboard structure
+            const contentWrapper = menu.querySelector('.dashboard-content-wrapper');
+            if (!contentWrapper) {
+                console.error('Dashboard content wrapper not found, menu structure may be incorrect');
+            }
+            return;
+        }
+        
+        if (!menu._tabsInitialized) {
+            tabs.forEach(tab => {
+                tab.addEventListener('click', () => {
+                    // Prevent clicking on licenses tab if not owner
+                    const targetTab = tab.getAttribute('data-tab');
+                    if (targetTab === 'licenses') {
+                        // Always check stored dashboard data for owner status (most up-to-date)
+                        // Handle both boolean true and truthy values (1, "true", etc.)
+                        const storedIsOwner = menu._dashboardData && 
+                            (menu._dashboardData.isOwner === true || menu._dashboardData.isOwner === 1 || menu._dashboardData.isOwner === 'true' || !!menu._dashboardData.isOwner);
+                        if (!storedIsOwner) {
+                            return; // Don't allow non-owners to click licenses tab
+                        }
+                    }
+                    
+                    menu._currentTab = targetTab;
+                    
+                    // Update active tab
+                    tabs.forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    
+                    // Update active content
+                    tabContents.forEach(content => {
+                        content.classList.remove('active');
+                        if (content.getAttribute('data-tab-content') === targetTab) {
+                            content.classList.add('active');
+                        }
+                    });
+                    
+                    // Refresh content for the selected tab
+                    if (menu._dashboardData) {
+                        this.refreshDashboardTab(targetTab, menu._dashboardData);
+                    }
+                });
+            });
+            menu._tabsInitialized = true;
+        }
+
+        // Grey out License Management tab for non-owners
+        // Check owner status from current data or stored dashboard data
+        // Handle both boolean true and truthy values (1, "true", etc.)
+        const dataIsOwner = data && (data.isOwner === true || data.isOwner === 1 || data.isOwner === 'true' || !!data.isOwner);
+        const storedIsOwner = menu._dashboardData && (menu._dashboardData.isOwner === true || menu._dashboardData.isOwner === 1 || menu._dashboardData.isOwner === 'true' || !!menu._dashboardData.isOwner);
+        const isOwner = dataIsOwner || storedIsOwner;
+        const licensesTab = Array.from(tabs).find(tab => tab.getAttribute('data-tab') === 'licenses');
+        
+        if (licensesTab) {
+            if (isOwner) {
+                licensesTab.style.opacity = '1';
+                licensesTab.style.pointerEvents = 'auto';
+                licensesTab.style.cursor = 'pointer';
+                licensesTab.style.filter = 'none';
+                licensesTab.disabled = false;
+                licensesTab.classList.remove('disabled');
+            } else {
+                licensesTab.style.opacity = '0.5';
+                licensesTab.style.pointerEvents = 'none';
+                licensesTab.style.cursor = 'not-allowed';
+                licensesTab.style.filter = 'grayscale(100%)';
+                licensesTab.disabled = true;
+                licensesTab.classList.add('disabled');
+            }
+        }
+        
+        // Set default tab or preserve current tab (but not licenses if not owner)
+        let defaultTab = (data && data.defaultTab) || menu._currentTab || 'maps';
+        if (defaultTab === 'licenses' && !isOwner) {
+            defaultTab = 'maps'; // Fallback to maps if trying to open licenses tab as non-owner
+        }
+        menu._currentTab = defaultTab;
+        
+        // Activate the correct tab
+        tabs.forEach(tab => {
+            const tabName = tab.getAttribute('data-tab');
+            if (tabName === defaultTab && tab.style.display !== 'none') {
+                tab.classList.add('active');
+            } else {
+                tab.classList.remove('active');
+            }
+        });
+        
+        // Activate the correct content
+        tabContents.forEach(content => {
+            if (content.getAttribute('data-tab-content') === defaultTab) {
+                content.classList.add('active');
+            } else {
+                content.classList.remove('active');
+            }
+        });
+
+        // Refresh content for the active tab
+        this.refreshDashboardTab(defaultTab, menu._dashboardData);
+
+        MenuManager.show(MENU_IDS.ADMIN_DASHBOARD);
+    },
+
+    /**
+     * Refresh dashboard tab content
+     */
+    refreshDashboardTab(tabName, data) {
+        const menu = MenuManager.get(MENU_IDS.ADMIN_DASHBOARD);
+        if (!menu) {
+            console.error('Dashboard menu not found for refresh');
+            return;
+        }
+
+        const content = menu.querySelector(`[data-tab-content="${tabName}"]`);
+        if (!content) {
+            console.error(`Dashboard tab content not found for: ${tabName}`);
+            return;
+        }
+
         content.innerHTML = '';
+
+        if (!data) {
+            console.warn('No data provided for dashboard refresh');
+            return;
+        }
         
+        // Update licenses tab styling based on owner status when refreshing
+        if (tabName === 'licenses' || data.isOwner !== undefined) {
+            // Handle both boolean true and truthy values (1, "true", etc.)
+            const isOwner = data && (data.isOwner === true || data.isOwner === 1 || data.isOwner === 'true' || !!data.isOwner);
+            const licensesTab = menu.querySelector('.dashboard-tab[data-tab="licenses"]');
+            if (licensesTab) {
+                if (isOwner) {
+                    licensesTab.style.opacity = '1';
+                    licensesTab.style.pointerEvents = 'auto';
+                    licensesTab.style.cursor = 'pointer';
+                    licensesTab.style.filter = 'none';
+                    licensesTab.disabled = false;
+                    licensesTab.classList.remove('disabled');
+                } else {
+                    licensesTab.style.opacity = '0.5';
+                    licensesTab.style.pointerEvents = 'none';
+                    licensesTab.style.cursor = 'not-allowed';
+                    licensesTab.style.filter = 'grayscale(100%)';
+                    licensesTab.disabled = true;
+                    licensesTab.classList.add('disabled');
+                }
+            }
+        }
+
+        if (tabName === 'maps') {
+            this.displayDashboardMaps(content, data.maps || []);
+        } else         if (tabName === 'weapons') {
+            // Update weapon list for weapon existence checking
+            WeaponConfigManager.currentWeaponsList = data.weapons || [];
+            this.displayDashboardWeapons(content, data.weapons || [], data.categories || []);
+        } else if (tabName === 'matches') {
+            this.displayDashboardMatches(content, data.matches || []);
+        } else if (tabName === 'licenses') {
+            this.displayDashboardLicenses(content, data.licenses || [], data.isOwner || false);
+        }
+    },
+
+    /**
+     * Display maps section in dashboard
+     */
+    displayDashboardMaps(content, maps) {
+        // Add Create Map button
+        const createBtn = Components.createButton('+ Create New Map', () => {
+            MenuManager.hide(MENU_IDS.ADMIN_DASHBOARD);
+            Utils.sendNuiCallback('editorMainAction', { action: 'createNewMap' });
+        }, 'primary', { style: { width: '100%', marginBottom: '16px' } });
+        content.appendChild(createBtn);
+
+        if (!maps || maps.length === 0) {
+            const item = Components.createMenuItem(
+                'No maps available',
+                'Create your first map using the map editor',
+                null,
+                { disabled: true, style: { cursor: 'default', opacity: '0.6' } }
+            );
+            content.appendChild(item);
+        } else {
+            maps.forEach(map => {
+                const item = document.createElement('div');
+                item.className = 'menu-item';
+                item.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
+
+                const left = document.createElement('div');
+                left.innerHTML = `
+                    <div style="font-weight: 600;">${map.name}</div>
+                    <div style="font-size: 11px; color: #888;">Spawns: ${map.spawns.length} | Radius: ${map.radius.toFixed(1)}m</div>
+                `;
+
+                const right = document.createElement('div');
+                right.style.cssText = 'display: flex; gap: 8px; align-items: center;';
+
+                const editBtn = Components.createButton('Edit', () => {
+                    MenuManager.hide(MENU_IDS.ADMIN_DASHBOARD);
+                    Utils.sendNuiCallback('loadMapForEdit', { mapId: map.id });
+                }, 'primary', { style: { padding: '6px 12px', fontSize: '12px' } });
+
+                const deleteBtn = Components.createButton('Delete', () => {
+                    DialogManager.showConfirm(
+                        `Are you sure you want to delete map "${map.name}"?\n\nThis action cannot be undone.`,
+                        () => {
+                            // Hide confirm dialog without releasing focus (dashboard is still open)
+                            MenuManager.hide(MENU_IDS.CONFIRM, { checkFocusRelease: false });
+                            const menu = MenuManager.get(MENU_IDS.ADMIN_DASHBOARD);
+                            const currentTab = menu?._currentTab || 'maps';
+                            // Mark as from dashboard to prevent focus release
+                            Utils.sendNuiCallback('deleteMap', { mapId: map.id, fromDashboard: true }).then(() => {
+                                // Refresh dashboard preserving current tab
+                                Utils.sendNuiCallback('refreshDashboard', { preserveTab: currentTab });
+                            });
+                        }
+                    );
+                }, 'secondary', {
+                    style: {
+                        padding: '6px 12px',
+                        fontSize: '12px',
+                        background: 'rgba(255, 68, 68, 0.2)',
+                        borderColor: '#ff4444',
+                        color: '#ff4444',
+                    },
+                });
+
+                right.appendChild(editBtn);
+                right.appendChild(deleteBtn);
+
+                item.appendChild(left);
+                item.appendChild(right);
+                content.appendChild(item);
+            });
+        }
+    },
+
+    /**
+     * Display weapons section in dashboard
+     */
+    displayDashboardWeapons(content, weapons, categories) {
+        // Add Weapon button
+        const addWepBtn = Components.createButton('+ Add Weapon', () => {
+            WeaponConfigManager.showAddWeaponDialog(categories);
+        }, 'primary', { style: { width: '100%', marginBottom: '16px' } });
+        content.appendChild(addWepBtn);
+
+        if (weapons.length === 0) {
+            const item = Components.createMenuItem(
+                'No weapons yet',
+                'Add weapons using the button above',
+                null,
+                { disabled: true, style: { opacity: '0.6', cursor: 'default' } }
+            );
+            content.appendChild(item);
+        } else {
+            weapons.forEach(weapon => {
+                const item = document.createElement('div');
+                item.className = 'menu-item';
+                item.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
+
+                const left = document.createElement('div');
+                left.innerHTML = `
+                    <div style="font-weight: 600;">${weapon.name}</div>
+                    <div style="font-size: 11px; color: #888;">${weapon.category} | Hash: ${weapon.hash}</div>
+                `;
+
+                const right = document.createElement('div');
+                right.style.cssText = 'display: flex; gap: 8px; align-items: center;';
+
+                const toggle = Components.createButton(
+                    weapon.enabled ? 'Enabled' : 'Disabled',
+                    (e) => {
+                        e.stopPropagation();
+                        const newState = !weapon.enabled;
+                        weapon.enabled = newState;
+                        toggle.textContent = newState ? 'Enabled' : 'Disabled';
+                        toggle.className = newState ? 'btn-primary' : 'btn-secondary';
+                        Utils.sendNuiCallback('updateWeaponConfig', {
+                            type: 'weapon',
+                            hash: weapon.hash,
+                            enabled: newState,
+                        }).then(() => {
+                            // Refresh dashboard after update to get latest data
+                            const menu = MenuManager.get(MENU_IDS.ADMIN_DASHBOARD);
+                            if (menu && menu.classList.contains('active')) {
+                                const currentTab = menu._currentTab || 'weapons';
+                                setTimeout(() => {
+                                    Utils.sendNuiCallback('refreshDashboard', { preserveTab: currentTab });
+                                }, 300);
+                            }
+                        });
+                    },
+                    weapon.enabled ? 'primary' : 'secondary',
+                    { style: { padding: '6px 12px', fontSize: '12px' } }
+                );
+
+                const removeBtn = Components.createButton(
+                    'Remove',
+                    (e) => {
+                        e.stopPropagation();
+                        DialogManager.showConfirm(
+                            `Are you sure you want to remove weapon "${weapon.name}"?`,
+                            () => {
+                                MenuManager.hide(MENU_IDS.CONFIRM);
+                                const menu = MenuManager.get(MENU_IDS.ADMIN_DASHBOARD);
+                                const currentTab = menu?._currentTab || 'weapons';
+                                Utils.sendNuiCallback('removeWeapon', { hash: weapon.hash }).then(() => {
+                                    setTimeout(() => {
+                                        Utils.sendNuiCallback('refreshDashboard', { preserveTab: currentTab });
+                                    }, 300);
+                                });
+                            }
+                        );
+                    },
+                    'secondary',
+                    {
+                        style: {
+                            padding: '6px 12px',
+                            fontSize: '12px',
+                            background: 'rgba(255, 68, 68, 0.2)',
+                            borderColor: '#ff4444',
+                            color: '#ff4444',
+                        },
+                    }
+                );
+
+                right.appendChild(toggle);
+                right.appendChild(removeBtn);
+
+                item.appendChild(left);
+                item.appendChild(right);
+                content.appendChild(item);
+            });
+        }
+    },
+
+    /**
+     * Display matches section in dashboard
+     */
+    displayDashboardMatches(content, matches) {
         if (!matches || matches.length === 0) {
             const item = Components.createMenuItem(
                 'No active matches',
@@ -1094,37 +1495,387 @@ const MenuHandlers = {
                 const statusColor = match.status === 'active' ? '#00ff00' : '#ffff00';
                 const statusText = match.status === 'active' ? 'Active' : 'Waiting';
                 
-                const item = Components.createMenuItem(
-                    `${match.gameMode} - ${match.map}`,
-                    `Status: ${statusText} | Players: ${match.players}/${match.maxPlayers} | Bucket: ${match.bucket}`,
-        () => {
-                        DialogManager.showConfirm(
-                            `Are you sure you want to close this match?\n\nGame Mode: ${match.gameMode}\nMap: ${match.map}\nPlayers: ${match.players}/${match.maxPlayers}`,
-                            () => {
-                                MenuManager.hide(MENU_IDS.CONFIRM);
-                                // Admin close match refreshes the same menu - keep focus, don't release
-                                MenuManager.isNavigating = true;
-                                Utils.sendNuiCallback('adminCloseMatch', { matchId: match.id });
-                                // Client will refresh the admin matches menu automatically
-                            }
-                        );
-                    }
-                );
+                // Create match header
+                const matchHeader = document.createElement('div');
+                matchHeader.className = 'menu-item';
+                matchHeader.style.cssText = 'margin-bottom: 8px;';
                 
-                const titleEl = item.querySelector('.menu-item-title');
-                if (titleEl) {
-                    const statusSpan = document.createElement('span');
-                    statusSpan.textContent = `[${statusText}]`;
-                    statusSpan.style.color = statusColor;
-                    statusSpan.style.marginLeft = '8px';
-                    titleEl.appendChild(statusSpan);
+                const headerContent = document.createElement('div');
+                headerContent.style.cssText = 'width: 100%;';
+                
+                const titleRow = document.createElement('div');
+                titleRow.style.cssText = 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;';
+                
+                const title = document.createElement('div');
+                title.style.cssText = 'font-weight: 600; font-size: 16px;';
+                title.textContent = `${match.gameMode} - ${match.map}`;
+                
+                const statusBadge = document.createElement('span');
+                statusBadge.textContent = statusText;
+                statusBadge.style.cssText = `color: ${statusColor}; font-size: 12px; font-weight: 600;`;
+                
+                titleRow.appendChild(title);
+                titleRow.appendChild(statusBadge);
+                
+                const infoRow = document.createElement('div');
+                infoRow.style.cssText = 'font-size: 12px; color: #888; margin-bottom: 8px;';
+                infoRow.textContent = `Players: ${match.players}/${match.maxPlayers} | Bucket: ${match.bucket}`;
+                
+                headerContent.appendChild(titleRow);
+                headerContent.appendChild(infoRow);
+                
+                // Player list
+                if (match.playerDetails && match.playerDetails.length > 0) {
+                    const playersHeader = document.createElement('div');
+                    playersHeader.style.cssText = 'font-size: 11px; color: #aaa; margin-top: 8px; margin-bottom: 4px; font-weight: 600;';
+                    playersHeader.textContent = 'Players:';
+                    headerContent.appendChild(playersHeader);
+                    
+                    match.playerDetails.forEach(player => {
+                        const playerItem = document.createElement('div');
+                        playerItem.style.cssText = 'font-size: 11px; color: #ccc; padding: 4px 0; padding-left: 12px;';
+                        playerItem.textContent = `${player.name} (ID: ${player.id}) - ${player.identifier}`;
+                        headerContent.appendChild(playerItem);
+                    });
                 }
                 
+                matchHeader.appendChild(headerContent);
+                content.appendChild(matchHeader);
+                
+                // Close match button
+                const closeBtn = Components.createButton('Close Match', () => {
+                    DialogManager.showConfirm(
+                        `Are you sure you want to close this match?\n\nGame Mode: ${match.gameMode}\nMap: ${match.map}\nPlayers: ${match.players}/${match.maxPlayers}`,
+                        () => {
+                            MenuManager.hide(MENU_IDS.CONFIRM, { checkFocusRelease: false });
+                            MenuManager.isNavigating = true;
+                            const menu = MenuManager.get(MENU_IDS.ADMIN_DASHBOARD);
+                            const currentTab = menu?._currentTab || 'matches';
+                            // Mark as from dashboard
+                            Utils.sendNuiCallback('adminCloseMatch', { matchId: match.id, fromDashboard: true }).then(() => {
+                                // Dashboard will be refreshed by the callback, but refresh again to ensure latest data
+                                setTimeout(() => {
+                                    Utils.sendNuiCallback('refreshDashboard', { preserveTab: currentTab });
+                                }, 300);
+                            });
+                        }
+                    );
+                }, 'secondary', {
+                    style: {
+                        width: '100%',
+                        marginBottom: '16px',
+                        background: 'rgba(255, 68, 68, 0.2)',
+                        borderColor: '#ff4444',
+                        color: '#ff4444',
+                    },
+                });
+                content.appendChild(closeBtn);
+            });
+        }
+    },
+
+    /**
+     * Display licenses section in dashboard
+     */
+    displayDashboardLicenses(content, licenses, isOwner) {
+        // Store licenses for use in search dialog
+        this._currentLicenses = licenses || [];
+        // Info header
+        const infoHeader = document.createElement('div');
+        infoHeader.style.cssText = 'padding: 12px; margin-bottom: 16px; background: rgba(9, 135, 255, 0.1); border-radius: 8px; border: 1px solid rgba(9, 135, 255, 0.3);';
+        infoHeader.innerHTML = `
+            <div style="font-weight: 600; margin-bottom: 4px;">License Management</div>
+            <div style="font-size: 12px; color: #aaa;">
+                ${isOwner 
+                    ? 'You are the owner. You can add and remove licenses that will have admin access to the dashboard.' 
+                    : 'You can view allowed licenses, but only the owner can manage them.'}
+            </div>
+        `;
+        content.appendChild(infoHeader);
+
+        // Add License button (only for owner) - opens search dialog
+        if (isOwner) {
+            const addLicenseBtn = Components.createButton('+ Add License', () => {
+                this.showPlayerSearchDialog();
+            }, 'primary', { style: { width: '100%', marginBottom: '16px' } });
+            content.appendChild(addLicenseBtn);
+        }
+
+        if (!licenses || licenses.length === 0) {
+            const item = Components.createMenuItem(
+                'No licenses added',
+                isOwner ? 'Add licenses using the button above' : 'No licenses have been added yet',
+                null,
+                { disabled: true, style: { cursor: 'default', opacity: '0.6' } }
+            );
+            content.appendChild(item);
+        } else {
+            licenses.forEach(licenseData => {
+                const license = licenseData.license || licenseData;
+                const cfxName = licenseData.cfxName;
+                const displayName = cfxName || license;
+                
+                const item = document.createElement('div');
+                item.className = 'menu-item';
+                item.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
+                
+                if (!isOwner) {
+                    item.style.opacity = '0.6';
+                    item.style.filter = 'grayscale(50%)';
+                }
+
+                const left = document.createElement('div');
+                left.innerHTML = `
+                    <div style="font-weight: 600;">${displayName}</div>
+                    <div style="font-size: 11px; color: #888;">${cfxName ? license : 'Has admin access to dashboard'}</div>
+                `;
+
+                const right = document.createElement('div');
+                right.style.cssText = 'display: flex; gap: 8px; align-items: center;';
+
+                if (isOwner) {
+                    const removeBtn = Components.createButton('Remove', () => {
+                        DialogManager.showConfirm(
+                            `Are you sure you want to remove this license?\n\n${cfxName ? `CFX: ${cfxName}\n` : ''}License: ${license}\n\nThis will revoke their admin access.`,
+                            () => {
+                                MenuManager.hide(MENU_IDS.CONFIRM, { checkFocusRelease: false });
+                                const menu = MenuManager.get(MENU_IDS.ADMIN_DASHBOARD);
+                                const currentTab = menu?._currentTab || 'licenses';
+                                Utils.sendNuiCallback('removeLicense', { license: license }).then(() => {
+                                    setTimeout(() => {
+                                        Utils.sendNuiCallback('refreshDashboard', { preserveTab: currentTab });
+                                    }, 300);
+                                });
+                            }
+                        );
+                    }, 'secondary', {
+                        style: {
+                            padding: '6px 12px',
+                            fontSize: '12px',
+                            background: 'rgba(255, 68, 68, 0.2)',
+                            borderColor: '#ff4444',
+                            color: '#ff4444',
+                        },
+                    });
+                    right.appendChild(removeBtn);
+                } else {
+                    const lockedLabel = document.createElement('div');
+                    lockedLabel.textContent = 'Owner Only';
+                    lockedLabel.style.cssText = 'font-size: 11px; color: #888; font-style: italic;';
+                    right.appendChild(lockedLabel);
+                }
+
+                item.appendChild(left);
+                item.appendChild(right);
                 content.appendChild(item);
             });
         }
+    },
+
+    /**
+     * Show player search dialog for adding licenses
+     */
+    showPlayerSearchDialog() {
+        const menu = MenuManager.get(MENU_IDS.PLAYER_SEARCH);
+        if (!menu) {
+            console.error("Player search menu not found");
+            return;
+        }
+
+        const content = MenuManager.getContent(MENU_IDS.PLAYER_SEARCH);
+        const titleEl = menu.querySelector('.paintball-title');
+        const errorEl = menu.querySelector('.error-message') || content?.querySelector('.error-message');
+
+        if (titleEl) titleEl.textContent = 'Search Players';
+        if (errorEl) {
+            errorEl.textContent = '';
+            errorEl.style.display = 'none';
+        }
+
+        if (!content) {
+            console.error("Player search content not found");
+            return;
+        }
+
+        // Clear content except error
+        content.innerHTML = '';
+        if (errorEl && errorEl.parentElement === content) {
+            content.appendChild(errorEl);
+        }
+
+        // Create search input container
+        const searchContainer = document.createElement('div');
+        searchContainer.style.cssText = 'width: 100%; margin-bottom: var(--spacing-lg);';
+
+        const searchInput = document.createElement('input');
+        searchInput.type = 'text';
+        searchInput.placeholder = 'Search by license identifier (min 2 characters)...';
+        searchInput.className = 'dialog-input';
+        searchInput.style.cssText = 'width: 100%; margin-bottom: var(--spacing-sm);';
+        searchContainer.appendChild(searchInput);
+
+        // Info text
+        const infoText = document.createElement('div');
+        infoText.style.cssText = 'font-size: var(--font-size-xs); color: var(--color-text-tertiary); margin-bottom: 0;';
+        infoText.textContent = 'Search by license identifier (e.g., license:abc123 or abc123)';
+        searchContainer.appendChild(infoText);
+
+        // Results container
+        const resultsList = document.createElement('div');
+        resultsList.className = 'menu-list';
+        resultsList.style.cssText = 'max-height: 400px; overflow-y: auto; overflow-x: hidden; width: 100%;';
+
+        let searchTimeout = null;
+        let currentResults = [];
+
+        const performSearch = (searchTerm) => {
+            if (searchTimeout) {
+                clearTimeout(searchTimeout);
+            }
+
+            if (!searchTerm || searchTerm.trim().length < 2) {
+                resultsList.innerHTML = '';
+                currentResults = [];
+                return;
+            }
+
+            searchTimeout = setTimeout(() => {
+                if (errorEl) {
+                    errorEl.textContent = '';
+                    errorEl.style.display = 'none';
+                }
+
+                // Show loading state
+                resultsList.innerHTML = '<div style="text-align: center; padding: var(--spacing-xl); color: var(--color-text-tertiary);">Searching...</div>';
+
+                Utils.sendNuiCallback('searchPlayers', { searchTerm: searchTerm.trim() })
+                    .then(res => res.json())
+                    .then((response) => {
+                        if (response.error) {
+                            if (errorEl) {
+                                errorEl.textContent = response.error;
+                                errorEl.style.display = 'block';
+                            }
+                            resultsList.innerHTML = '';
+                            currentResults = [];
+                            return;
+                        }
+
+                        currentResults = response.players || [];
+                        resultsList.innerHTML = '';
+
+                        if (currentResults.length === 0) {
+                            const empty = Components.createMenuItem('No players found', 'Try a different search term', null, {
+                                disabled: true,
+                                style: { textAlign: 'center', padding: '20px' },
+                            });
+                            resultsList.appendChild(empty);
+                        } else {
+                            const currentLicenses = this._currentLicenses || [];
+                            currentResults.forEach((player) => {
+                                // Check if license is already added (handle both old string format and new object format)
+                                const isAlreadyAdded = currentLicenses.some(lic => {
+                                    const licValue = typeof lic === 'string' ? lic : lic.license;
+                                    return licValue === player.license;
+                                });
+                                const statusColor = isAlreadyAdded
+                                    ? 'var(--color-text-tertiary)'
+                                    : player.online
+                                    ? 'var(--color-success)'
+                                    : 'var(--color-error)';
+                                const statusText = isAlreadyAdded
+                                    ? 'Already Added'
+                                    : player.online
+                                    ? 'Online'
+                                    : 'Offline';
+
+                                // Display CFX name if available, otherwise show license
+                                const displayName = player.cfxName || player.license
+
+                                const item = Components.createMenuItem(
+                                    displayName,
+                                    `<span style="color: ${statusColor};">${statusText}</span>`,
+                                    isAlreadyAdded
+                                        ? null
+                                        : () => {
+                                              // Add license
+                                              Utils.sendNuiCallback('addLicense', { license: player.license })
+                                                  .then(() => {
+                                                      // Close search dialog without releasing focus (dashboard stays open)
+                                                      MenuManager.hide(MENU_IDS.PLAYER_SEARCH, { checkFocusRelease: false });
+                                                      // Refresh dashboard to show new license
+                                                      const dashboardMenu = MenuManager.get(MENU_IDS.ADMIN_DASHBOARD);
+                                                      if (dashboardMenu && dashboardMenu.classList.contains('active')) {
+                                                          const currentTab = dashboardMenu._currentTab || 'licenses';
+                                                          setTimeout(() => {
+                                                              Utils.sendNuiCallback('refreshDashboard', { preserveTab: currentTab });
+                                                          }, 300);
+                                                      }
+                                                  });
+                                          },
+                                    {
+                                        disabled: isAlreadyAdded,
+                                        style: isAlreadyAdded
+                                            ? { opacity: '0.5', cursor: 'not-allowed', filter: 'grayscale(100%)', pointerEvents: 'none' }
+                                            : {},
+                                    }
+                                );
+
+                                // Add additional info - License and status
+                                const itemEl = item;
+                                const descEl = itemEl.querySelector('.menu-item-description');
+                                if (descEl) {
+                                    let descHtml = '';
+                                    if (player.cfxName) {
+                                        descHtml += `<div style="margin-bottom: 4px; word-break: break-all; font-size: var(--font-size-xs); color: var(--color-text-secondary);">${player.license}</div>`;
+                                    }
+                                    descHtml += `<div style="font-size: var(--font-size-xs); color: var(--color-text-tertiary); line-height: 1.4;"><span style="color: ${statusColor};">${player.online ? '●' : '○'}</span> ${statusText}</div>`;
+                                    descEl.innerHTML = descHtml;
+                                }
+
+                                resultsList.appendChild(item);
+                            });
+                        }
+                    })
+                    .catch((error) => {
+                        console.error('Search error:', error);
+                        if (errorEl) {
+                            errorEl.textContent = 'Failed to search. Please try again.';
+                            errorEl.style.display = 'block';
+                        }
+                        resultsList.innerHTML = '';
+                        currentResults = [];
+                    });
+            }, 300); // Debounce search
+        };
+
+        searchInput.addEventListener('input', (e) => {
+            performSearch(e.target.value);
+        });
+
+        searchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                MenuManager.hide(MENU_IDS.PLAYER_SEARCH, { checkFocusRelease: false });
+            }
+        });
+
+        // Cancel button
+        const cancelBtn = Components.createButton('Cancel', () => {
+            MenuManager.hide(MENU_IDS.PLAYER_SEARCH, { checkFocusRelease: false });
+        }, 'secondary', { style: { width: '100%', marginTop: '12px' } });
+
+        content.appendChild(searchContainer);
+        content.appendChild(resultsList);
+        content.appendChild(cancelBtn);
+
+        // Set navigation flag to prevent focus release
+        MenuManager.isNavigating = true;
+        MenuManager.show(MENU_IDS.PLAYER_SEARCH);
         
-        MenuManager.show(MENU_IDS.ADMIN_MATCHES);
+        // Focus input after a short delay
+        setTimeout(() => {
+            searchInput.focus();
+        }, 100);
     },
 };
 
@@ -1410,140 +2161,21 @@ const MatchManager = {
 };
 
 // ============================================================================
-// WEAPON CONFIG MANAGER
+// WEAPON CONFIG MANAGER (for dashboard integration only)
 // ============================================================================
 const WeaponConfigManager = {
-    currentWeaponsList: [],
-
-    /**
-     * Display weapon configuration
-     */
-    displayWeaponConfig(categories, weapons) {
-        const content = MenuManager.getContent(MENU_IDS.WEAPON_CONFIG);
-        if (!content) return;
-        
-        this.currentWeaponsList = weapons || [];
-        content.innerHTML = '';
-        
-        // Add Weapon button
-        const addWepBtn = Components.createButton('+ Add Weapon', () => {
-            this.showAddWeaponDialog(categories);
-        }, 'primary', { style: { width: '100%', marginBottom: '16px' } });
-        content.appendChild(addWepBtn);
-        
-        // Categories section
-        const catHeader = Components.createMenuItem('Categories', '', null, {
-            style: { background: 'rgba(9, 135, 255, 0.3)', cursor: 'default', fontWeight: '600', marginTop: '16px' },
-        });
-        content.appendChild(catHeader);
-    
-    if (categories.length === 0) {
-            const emptyMsg = Components.createMenuItem('No categories found', '', null, {
-                disabled: true,
-                style: { opacity: '0.6', cursor: 'default' },
-            });
-            content.appendChild(emptyMsg);
-    } else {
-        categories.forEach(cat => {
-                const item = Components.createMenuItem(
-                    cat.name,
-                    `ID: ${cat.id} ${cat.enabled ? '(Enabled)' : '(Disabled)'}`,
-                    null,
-                    { style: { cursor: 'default', opacity: cat.enabled ? '1.0' : '0.6' } }
-                );
-                content.appendChild(item);
-        });
-    }
-    
-    // Weapons section
-        const wepHeader = Components.createMenuItem('Weapons', '', null, {
-            style: { background: 'rgba(9, 135, 255, 0.3)', cursor: 'default', fontWeight: '600', marginTop: '16px' },
-        });
-        content.appendChild(wepHeader);
-    
-    if (weapons.length === 0) {
-            const emptyMsg = Components.createMenuItem('No weapons yet', '', null, {
-                disabled: true,
-                style: { opacity: '0.6', cursor: 'default' },
-            });
-            content.appendChild(emptyMsg);
-    } else {
-        weapons.forEach(weapon => {
-            const item = document.createElement('div');
-            item.className = 'menu-item';
-                item.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
-            
-            const left = document.createElement('div');
-            left.innerHTML = `<div style="font-weight: 600;">${weapon.name}</div><div style="font-size: 11px; color: #888;">${weapon.category} | Hash: ${weapon.hash}</div>`;
-            
-            const right = document.createElement('div');
-                right.style.cssText = 'display: flex; gap: 8px; align-items: center;';
-                
-                const toggle = Components.createButton(
-                    weapon.enabled ? 'Enabled' : 'Disabled',
-                    (e) => {
-                e.stopPropagation();
-                const newState = !weapon.enabled;
-                weapon.enabled = newState;
-                toggle.textContent = newState ? 'Enabled' : 'Disabled';
-                toggle.className = newState ? 'btn-primary' : 'btn-secondary';
-                        Utils.sendNuiCallback('updateWeaponConfig', {
-                            type: 'weapon',
-                            hash: weapon.hash,
-                            enabled: newState,
-                        });
-                    },
-                    weapon.enabled ? 'primary' : 'secondary',
-                    { style: { padding: '6px 12px', fontSize: '12px' } }
-                );
-                
-                const removeBtn = Components.createButton(
-                    'Remove',
-                    (e) => {
-                e.stopPropagation();
-                        DialogManager.showConfirm(
-                    `Are you sure you want to remove weapon "${weapon.name}"?`,
-                    () => {
-                                MenuManager.hide(MENU_IDS.CONFIRM);
-                                Utils.sendNuiCallback('removeWeapon', { hash: weapon.hash }).then(() => {
-                            setTimeout(() => {
-                                        Utils.sendNuiCallback('refreshWeaponConfig');
-                            }, 300);
-                        });
-                            }
-                        );
-                    },
-                    'secondary',
-                    {
-                        style: {
-                            padding: '6px 12px',
-                            fontSize: '12px',
-                            background: 'rgba(255, 68, 68, 0.2)',
-                            borderColor: '#ff4444',
-                            color: '#ff4444',
-                        },
-                    }
-                );
-            
-            right.appendChild(toggle);
-            right.appendChild(removeBtn);
-            
-            item.appendChild(left);
-            item.appendChild(right);
-                content.appendChild(item);
-            });
-        }
-        
-        MenuManager.show(MENU_IDS.WEAPON_CONFIG);
-    },
+    currentWeaponsList: [], // Used for checking if weapon exists when adding
 
     /**
      * Show add weapon dialog
      */
     showAddWeaponDialog(categories) {
+        // Check if dashboard is open
+        const dashboardMenu = MenuManager.get(MENU_IDS.ADMIN_DASHBOARD);
+        const isFromDashboard = dashboardMenu && dashboardMenu.classList.contains('active');
+        
         // Navigating to weapon selection dialog - set navigation flag
         MenuManager.isNavigating = true;
-        MenuManager.hide(MENU_IDS.WEAPON_CONFIG, { checkFocusRelease: false });
         
         fetch(`https://${Utils.getResourceName()}/getOXItems`, {
         method: 'POST',
@@ -1555,19 +2187,22 @@ const WeaponConfigManager = {
             const itemName = item.name || '';
             return itemName.toLowerCase().startsWith('weapon_');
         });
-                this.showWeaponSelectionDialog(categories, weaponItems);
+                this.showWeaponSelectionDialog(categories, weaponItems, isFromDashboard);
     })
     .catch(() => {
-                this.showWeaponSelectionDialog(categories, []);
+                this.showWeaponSelectionDialog(categories, [], isFromDashboard);
             });
     },
 
     /**
      * Show weapon selection dialog
      */
-    showWeaponSelectionDialog(categories, oxItems) {
+    showWeaponSelectionDialog(categories, oxItems, isFromDashboard = false) {
         const menu = MenuManager.get(MENU_IDS.WEAPON_SELECT);
         if (!menu) return;
+        
+        // Store dashboard context
+        menu._isFromDashboard = isFromDashboard;
         
         const content = menu.querySelector('.paintball-dialog') || menu.querySelector('.paintball-menu');
         const titleEl = menu.querySelector('.paintball-title');
@@ -1590,9 +2225,9 @@ const WeaponConfigManager = {
     });
     
     if (oxItems.length > 0) {
-            this.showOXWeaponSelection(content, categories, oxItems, errorEl);
+            this.showOXWeaponSelection(content, categories, oxItems, errorEl, isFromDashboard);
     } else {
-            this.showManualWeaponEntry(content, categories, errorEl);
+            this.showManualWeaponEntry(content, categories, errorEl, isFromDashboard);
         }
         
         // Clear navigation flag when weapon selection dialog is shown (navigation complete)
@@ -1603,7 +2238,7 @@ const WeaponConfigManager = {
     /**
      * Show manual weapon entry
      */
-    showManualWeaponEntry(content, categories, errorEl) {
+    showManualWeaponEntry(content, categories, errorEl, isFromDashboard = false) {
         const hashInput = Components.createInput('Enter weapon hash (e.g., WEAPON_PISTOL or PISTOL)', {
             style: { marginBottom: '12px' },
         });
@@ -1636,15 +2271,22 @@ const WeaponConfigManager = {
             // Navigating to category selection - set navigation flag
             MenuManager.isNavigating = true;
             MenuManager.hide(MENU_IDS.WEAPON_SELECT, { checkFocusRelease: false });
-            this.showCategorySelection(categories);
+            this.showCategorySelection(categories, isFromDashboard);
         }, 'primary');
         
         const cancelBtn = Components.createButton('Cancel', () => {
-            // Canceling - navigate back to weapon config
+            // Canceling - navigate back to dashboard or weapon config
             MenuManager.isNavigating = true;
             MenuManager.hide(MENU_IDS.WEAPON_SELECT, { checkFocusRelease: false });
-            // Reopen weapon config menu
-            Utils.sendNuiCallback('refreshWeaponConfig');
+            if (isFromDashboard) {
+                // Return to dashboard
+                const dashboardMenu = MenuManager.get(MENU_IDS.ADMIN_DASHBOARD);
+                const currentTab = dashboardMenu?._currentTab || 'weapons';
+                Utils.sendNuiCallback('refreshDashboard', { preserveTab: currentTab });
+            } else {
+                // Reopen weapon config menu
+                Utils.sendNuiCallback('refreshWeaponConfig');
+            }
         }, 'secondary');
     
     buttonContainer.appendChild(submitBtn);
@@ -1660,7 +2302,7 @@ const WeaponConfigManager = {
     /**
      * Show OX weapon selection
      */
-    showOXWeaponSelection(content, categories, oxItems, errorEl) {
+    showOXWeaponSelection(content, categories, oxItems, errorEl, isFromDashboard = false) {
         const searchInput = Components.createInput('Search items...', {
             style: { marginBottom: '12px' },
         });
@@ -1685,7 +2327,7 @@ const WeaponConfigManager = {
                         // Navigating to category selection - set navigation flag
                         MenuManager.isNavigating = true;
                         MenuManager.hide(MENU_IDS.WEAPON_SELECT, { checkFocusRelease: false });
-                        this.showCategorySelection(categories);
+                        this.showCategorySelection(categories, isFromDashboard);
                     },
                     {
                         disabled: alreadyExists,
@@ -1717,11 +2359,18 @@ const WeaponConfigManager = {
     });
     
         const cancelBtn = Components.createButton('Cancel', () => {
-            // Canceling - navigate back to weapon config
+            // Canceling - navigate back to dashboard or weapon config
             MenuManager.isNavigating = true;
             MenuManager.hide(MENU_IDS.WEAPON_SELECT, { checkFocusRelease: false });
-            // Reopen weapon config menu
-            Utils.sendNuiCallback('refreshWeaponConfig');
+            if (isFromDashboard) {
+                // Return to dashboard
+                const dashboardMenu = MenuManager.get(MENU_IDS.ADMIN_DASHBOARD);
+                const currentTab = dashboardMenu?._currentTab || 'weapons';
+                Utils.sendNuiCallback('refreshDashboard', { preserveTab: currentTab });
+            } else {
+                // Reopen weapon config menu
+                Utils.sendNuiCallback('refreshWeaponConfig');
+            }
         }, 'secondary', { style: { width: '100%' } });
     
     content.appendChild(searchInput);
@@ -1756,7 +2405,7 @@ const WeaponConfigManager = {
     /**
      * Show category selection
      */
-    showCategorySelection(categories) {
+    showCategorySelection(categories, isFromDashboard = false) {
         const content = MenuManager.getContent(MENU_IDS.CATEGORY_SELECT);
         if (!content) return;
         
@@ -1781,12 +2430,19 @@ const WeaponConfigManager = {
         }
         
         const cancelItem = Components.createMenuItem('Cancel', 'Cancel adding weapon', () => {
-            // Canceling - navigate back to weapon selection
+            // Canceling - navigate back to weapon selection or dashboard
             MenuManager.isNavigating = true;
             MenuManager.hide(MENU_IDS.CATEGORY_SELECT, { checkFocusRelease: false });
             this.pendingWeaponData = null;
-            // Reopen weapon selection dialog
-            this.showWeaponSelectionDialog(categories, []);
+            if (isFromDashboard) {
+                // Return to dashboard
+                const dashboardMenu = MenuManager.get(MENU_IDS.ADMIN_DASHBOARD);
+                const currentTab = dashboardMenu?._currentTab || 'weapons';
+                Utils.sendNuiCallback('refreshDashboard', { preserveTab: currentTab });
+            } else {
+                // Reopen weapon selection dialog
+                this.showWeaponSelectionDialog(categories, [], false);
+            }
         });
     cancelItem.style.borderColor = 'rgba(255, 68, 68, 0.3)';
         content.appendChild(cancelItem);
@@ -1805,6 +2461,10 @@ const WeaponConfigManager = {
             return;
         }
         
+        // Check if we're in dashboard context
+        const dashboardMenu = MenuManager.get(MENU_IDS.ADMIN_DASHBOARD);
+        const isFromDashboard = dashboardMenu && dashboardMenu.classList.contains('active');
+        
         Utils.sendNuiCallback('addWeapon', {
             hash: this.pendingWeaponData.hash,
             name: this.pendingWeaponData.name,
@@ -1812,12 +2472,21 @@ const WeaponConfigManager = {
         }).then(response => {
             if (response && response.ok !== false) {
                 this.pendingWeaponData = null;
-                // Weapon added successfully - refresh weapon config menu
+                // Weapon added successfully - refresh dashboard or weapon config menu
                 MenuManager.isNavigating = true;
                 MenuManager.hide(MENU_IDS.WEAPON_SELECT, { checkFocusRelease: false });
                 MenuManager.hide(MENU_IDS.CATEGORY_SELECT, { checkFocusRelease: false });
-                // Refresh weapon config to show new weapon
-                Utils.sendNuiCallback('refreshWeaponConfig');
+                
+                if (isFromDashboard) {
+                    // Refresh dashboard
+                    const currentTab = dashboardMenu?._currentTab || 'weapons';
+                    Utils.sendNuiCallback('refreshDashboard', { preserveTab: currentTab });
+                } else {
+                    // Refresh weapon config to show new weapon
+                    const dashboardMenu = MenuManager.get(MENU_IDS.ADMIN_DASHBOARD);
+                    const currentTab = dashboardMenu?._currentTab || 'weapons';
+                    Utils.sendNuiCallback('refreshDashboard', { preserveTab: currentTab });
+                }
             } else {
                 const errorEl = MenuManager.get(MENU_IDS.WEAPON_SELECT)?.querySelector('.error-message');
                 Components.showError(errorEl, 'Failed to add weapon. Please try again.');
@@ -1851,9 +2520,6 @@ window.addEventListener('message', function(event) {
                 forEditing: data.forEditing || false,
                 forDeleting: data.forDeleting || false,
             });
-            break;
-        case 'showAdminMatches':
-            MenuHandlers.displayAdminMatches(data.matches);
             break;
         case 'showEditorMainMenu':
             MenuHandlers.displayEditorMainMenu();
@@ -1929,20 +2595,11 @@ window.addEventListener('message', function(event) {
         case 'showWeaponSelection':
             MenuHandlers.displayWeaponSelection(data.categories, data.weapons, data.forMatch);
             break;
-        case 'showWeaponConfig':
-            const weaponSelectUI = MenuManager.get(MENU_IDS.WEAPON_SELECT);
-            if (weaponSelectUI && weaponSelectUI.getAttribute('data-error-open') === 'true') {
-                break;
-            }
-            const categories = data.categories || data.Categories || [];
-            const weapons = data.weapons || data.Weapons || [];
-            // Clear navigation flag when weapon config is shown (navigation complete)
-            MenuManager.isNavigating = false;
-            WeaponConfigManager.displayWeaponConfig(categories, weapons);
-            MenuManager.show(MENU_IDS.WEAPON_CONFIG);
-            break;
         case 'showError':
             DialogManager.showError(data.message || 'An error occurred');
+            break;
+        case 'showAdminDashboard':
+            MenuHandlers.displayAdminDashboard(data);
             break;
     }
 });

@@ -456,9 +456,14 @@ RegisterNUICallback('deleteMap', function(data, cb)
     
     TriggerServerEvent('envy_paintball:deleteMap', mapId)
     
-    -- Close the map menu and refresh
-    SendNUIMessage({ action = 'hideMenu', menu = 'map' })
-    SetNuiFocus(false, false)
+    -- Only close map menu if not called from dashboard (dashboard handles its own refresh)
+    -- Check if dashboard is open by checking if the action is coming from dashboard context
+    if not data.fromDashboard then
+        -- Close map menu and release focus
+        SendNUIMessage({ action = 'hideMenu', menu = 'map' })
+        SetNuiFocus(false, false)
+    end
+    -- If from dashboard, dashboard will refresh itself via refreshDashboard callback
     
     cb('ok')
 end)
@@ -617,21 +622,80 @@ RegisterNUICallback('addWeapon', function(data, cb)
     cb('ok')
 end)
 
+RegisterNUICallback('addLicense', function(data, cb)
+    TriggerServerEvent('envy_paintball:addLicense', data.license)
+    cb('ok')
+end)
+
+RegisterNUICallback('removeLicense', function(data, cb)
+    TriggerServerEvent('envy_paintball:removeLicense', data.license)
+    cb('ok')
+end)
+
+RegisterNUICallback('searchPlayers', function(data, cb)
+    ESX.TriggerServerCallback('envy_paintball:searchPlayers', function(result)
+        cb(result)
+    end, data.searchTerm)
+end)
+
 RegisterNUICallback('removeWeapon', function(data, cb)
     TriggerServerEvent('envy_paintball:removeWeapon', data.hash)
     cb('ok')
 end)
 
 RegisterNUICallback('refreshWeaponConfig', function(data, cb)
-    SetNuiFocus(true, true)
-    ESX.TriggerServerCallback('envy_paintball:getAllWeapons', function(data)
-        Wait(100)
-        SendNUIMessage({
-            action = 'showWeaponConfig',
-            categories = data.categories,
-            weapons = data.weapons
-        })
+    -- Refresh dashboard (redirects to dashboard)
+    local preserveTab = 'weapons'
+    ESX.TriggerServerCallback('envy_paintball:isOwner', function(isOwnerStatus)
+        local isOwnerBool = (isOwnerStatus == true or isOwnerStatus == 1) and true or false
+        ESX.TriggerServerCallback('envy_paintball:getLicenses', function(licenses)
+            ESX.TriggerServerCallback('envy_paintball:getMaps', function(maps)
+                ESX.TriggerServerCallback('envy_paintball:getAllWeapons', function(weaponData)
+                    ESX.TriggerServerCallback('envy_paintball:getAllActiveMatches', function(matches)
+                        SetNuiFocus(true, true)
+                        SendNUIMessage({
+                            action = 'showAdminDashboard',
+                            maps = maps or {},
+                            weapons = weaponData.weapons or {},
+                            categories = weaponData.categories or {},
+                            matches = matches or {},
+                            licenses = licenses or {},
+                            isOwner = isOwnerBool,
+                            defaultTab = preserveTab
+                        })
+                    end)
+                end)
+            end)
+        end)
     end)
+    cb('ok')
+end)
+
+RegisterNUICallback('refreshDashboard', function(data, cb)
+    local preserveTab = data and data.preserveTab or nil
+            ESX.TriggerServerCallback('envy_paintball:isOwner', function(isOwnerStatus)
+                -- Convert truthy value to explicit boolean
+                local isOwnerBool = (isOwnerStatus == true or isOwnerStatus == 1) and true or false
+                ESX.TriggerServerCallback('envy_paintball:getLicenses', function(licenses)
+                    ESX.TriggerServerCallback('envy_paintball:getMaps', function(maps)
+                        ESX.TriggerServerCallback('envy_paintball:getAllWeapons', function(weaponData)
+                            ESX.TriggerServerCallback('envy_paintball:getAllActiveMatches', function(matches)
+                                SetNuiFocus(true, true)
+                                SendNUIMessage({
+                                    action = 'showAdminDashboard',
+                                    maps = maps or {},
+                                    weapons = weaponData.weapons or {},
+                                    categories = weaponData.categories or {},
+                                    matches = matches or {},
+                                    licenses = licenses or {},
+                                    isOwner = isOwnerBool,
+                                    defaultTab = preserveTab
+                                })
+                            end)
+                        end)
+                    end)
+                end)
+            end)
     cb('ok')
 end)
 
@@ -643,14 +707,58 @@ end)
 
 RegisterNUICallback('adminCloseMatch', function(data, cb)
     local matchId = data.matchId
+    local fromDashboard = data.fromDashboard or false
     TriggerServerEvent('envy_paintball:adminCloseMatch', matchId)
     Wait(500)
-    ESX.TriggerServerCallback('envy_paintball:getAllActiveMatches', function(matches)
-        SendNUIMessage({
-            action = 'showAdminMatches',
-            matches = matches or {}
-        })
-    end)
+    
+    if fromDashboard then
+        -- Refresh dashboard
+        ESX.TriggerServerCallback('envy_paintball:isOwner', function(isOwnerStatus)
+            -- Convert truthy value (1, true) to explicit boolean
+            local isOwnerBool = (isOwnerStatus == true or isOwnerStatus == 1) and true or false
+            ESX.TriggerServerCallback('envy_paintball:getLicenses', function(licenses)
+                ESX.TriggerServerCallback('envy_paintball:getMaps', function(maps)
+                    ESX.TriggerServerCallback('envy_paintball:getAllWeapons', function(weaponData)
+                        ESX.TriggerServerCallback('envy_paintball:getAllActiveMatches', function(matches)
+                            SendNUIMessage({
+                                action = 'showAdminDashboard',
+                                maps = maps or {},
+                                weapons = weaponData.weapons or {},
+                                categories = weaponData.categories or {},
+                                matches = matches or {},
+                                licenses = licenses or {},
+                                isOwner = isOwnerBool,
+                                defaultTab = 'matches'
+                            })
+                        end)
+                    end)
+                end)
+            end)
+        end)
+    else
+        -- Fallback: refresh dashboard
+        ESX.TriggerServerCallback('envy_paintball:isOwner', function(isOwnerStatus)
+            local isOwnerBool = (isOwnerStatus == true or isOwnerStatus == 1) and true or false
+            ESX.TriggerServerCallback('envy_paintball:getLicenses', function(licenses)
+                ESX.TriggerServerCallback('envy_paintball:getMaps', function(maps)
+                    ESX.TriggerServerCallback('envy_paintball:getAllWeapons', function(weaponData)
+                        ESX.TriggerServerCallback('envy_paintball:getAllActiveMatches', function(matches)
+                            SendNUIMessage({
+                                action = 'showAdminDashboard',
+                                maps = maps or {},
+                                weapons = weaponData.weapons or {},
+                                categories = weaponData.categories or {},
+                                matches = matches or {},
+                                licenses = licenses or {},
+                                isOwner = isOwnerBool,
+                                defaultTab = 'matches'
+                            })
+                        end)
+                    end)
+                end)
+            end)
+        end)
+    end
     cb('ok')
 end)
 
@@ -890,25 +998,58 @@ RegisterNetEvent('envy_paintball:teleportToSpawn', function(spawn)
 end)
 
 RegisterNetEvent('envy_paintball:openWeaponConfig', function()
-    ESX.TriggerServerCallback('envy_paintball:getAllWeapons', function(data)
-        SetNuiFocus(true, true)
-        SendNUIMessage({
-            action = 'showWeaponConfig',
-            categories = data.categories,
-            weapons = data.weapons
-        })
+    -- Open dashboard with weapons tab selected
+    ESX.TriggerServerCallback('envy_paintball:isOwner', function(isOwnerStatus)
+        -- Convert truthy value (1, true) to explicit boolean
+        local isOwnerBool = (isOwnerStatus == true or isOwnerStatus == 1) and true or false
+        ESX.TriggerServerCallback('envy_paintball:getLicenses', function(licenses)
+            ESX.TriggerServerCallback('envy_paintball:getMaps', function(maps)
+                ESX.TriggerServerCallback('envy_paintball:getAllWeapons', function(weaponData)
+                    ESX.TriggerServerCallback('envy_paintball:getAllActiveMatches', function(matches)
+                        SetNuiFocus(true, true)
+                        SendNUIMessage({
+                            action = 'showAdminDashboard',
+                            maps = maps or {},
+                            weapons = weaponData.weapons or {},
+                            categories = weaponData.categories or {},
+                            matches = matches or {},
+                            licenses = licenses or {},
+                            isOwner = isOwnerBool,
+                            defaultTab = 'weapons'
+                        })
+                    end)
+                end)
+            end)
+        end)
     end)
 end)
 
 RegisterNetEvent('envy_paintball:weaponConfigUpdated', function()
-    ESX.TriggerServerCallback('envy_paintball:getAllWeapons', function(data)
-        Wait(100)
-        SetNuiFocus(true, true)
-        SendNUIMessage({
-            action = 'showWeaponConfig',
-            categories = data.categories,
-            weapons = data.weapons
-        })
+    -- Check if dashboard is open, if so refresh it
+    ESX.TriggerServerCallback('envy_paintball:isOwner', function(isOwnerStatus)
+        -- Convert truthy value (1, true) to explicit boolean
+        local isOwnerBool = (isOwnerStatus == true or isOwnerStatus == 1) and true or false
+        ESX.TriggerServerCallback('envy_paintball:getLicenses', function(licenses)
+            ESX.TriggerServerCallback('envy_paintball:getMaps', function(maps)
+                ESX.TriggerServerCallback('envy_paintball:getAllWeapons', function(weaponData)
+                    ESX.TriggerServerCallback('envy_paintball:getAllActiveMatches', function(matches)
+                        Wait(100)
+                        SetNuiFocus(true, true)
+                        -- Refresh dashboard
+                        SendNUIMessage({
+                            action = 'showAdminDashboard',
+                            maps = maps or {},
+                            weapons = weaponData.weapons or {},
+                            categories = weaponData.categories or {},
+                            matches = matches or {},
+                            licenses = licenses or {},
+                            isOwner = isOwnerBool,
+                            defaultTab = 'weapons'
+                        })
+                    end)
+                end)
+            end)
+        end)
     end)
 end)
 
@@ -988,37 +1129,40 @@ end)
 -- COMMANDS
 -- ============================================================================
 
-RegisterCommand('paintball_editor', function()
-    ESX.TriggerServerCallback('envy_paintball:isAdmin', function(adminStatus)
-        isAdmin = adminStatus
-        if isAdmin then
-            if mapEditorActive then
-                StopMapEditor()
-            else
-                OpenEditorMainMenu()
-            end
-        else
-            ESX.ShowNotification("You don't have permission to use the map editor", "error")
-        end
-    end)
-end, false)
-
+-- Admin Dashboard Command
 RegisterCommand('paintball_admin', function()
     ESX.TriggerServerCallback('envy_paintball:isAdmin', function(adminStatus)
         isAdmin = adminStatus
         if isAdmin then
-            ESX.TriggerServerCallback('envy_paintball:getAllActiveMatches', function(matches)
-                SetNuiFocus(true, true)
-                SendNUIMessage({
-                    action = 'showAdminMatches',
-                    matches = matches or {}
-                })
-            end)
+            -- Load all data for the dashboard
+                ESX.TriggerServerCallback('envy_paintball:isOwner', function(isOwnerStatus)
+                    -- Convert truthy value (1, true) to explicit boolean
+                    local isOwnerBool = (isOwnerStatus == true or isOwnerStatus == 1) and true or false
+                    ESX.TriggerServerCallback('envy_paintball:getLicenses', function(licenses)
+                        ESX.TriggerServerCallback('envy_paintball:getMaps', function(maps)
+                            ESX.TriggerServerCallback('envy_paintball:getAllWeapons', function(weaponData)
+                                ESX.TriggerServerCallback('envy_paintball:getAllActiveMatches', function(matches)
+                                    SetNuiFocus(true, true)
+                                    SendNUIMessage({
+                                        action = 'showAdminDashboard',
+                                        maps = maps or {},
+                                        weapons = weaponData.weapons or {},
+                                        categories = weaponData.categories or {},
+                                        matches = matches or {},
+                                        licenses = licenses or {},
+                                        isOwner = isOwnerBool
+                                    })
+                                end)
+                            end)
+                        end)
+                    end)
+                end)
         else
             ESX.ShowNotification("You don't have permission to use this command", "error")
         end
     end)
 end, false)
+
 
 RegisterCommand('leavepaintball', function()
     TriggerServerEvent('envy_paintball:leaveMatch')
