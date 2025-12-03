@@ -11,10 +11,72 @@ local playerMatches = {} -- Maps playerId to matchId
 local weapons = {}
 local playerCoords = {} -- Server-side coordinate tracking for distance validation
 local allowedLicenses = {} -- List of licenses that have admin access {license = "license:xxx", cfxName = "Joshua"}
+local ghostedPlayers = {} -- Track which players are currently ghosted (spawn protection)
 
 -- ============================================================================
 -- HELPER FUNCTIONS
 -- ============================================================================
+
+-- Get player's team number (returns nil for FFA)
+local function GetPlayerTeam(match, playerId)
+    if not match or not match.gameMode then return nil end
+    if match.gameMode.teams == 0 then
+        return nil -- FFA mode
+    end
+    
+    if not match.teams then return nil end
+    
+    for teamNum, teamPlayers in ipairs(match.teams) do
+        for _, pId in ipairs(teamPlayers) do
+            if pId == playerId then
+                return teamNum
+            end
+        end
+    end
+    return nil
+end
+
+-- Get appropriate spawn point for player
+local function GetSpawnPointForPlayer(match, playerId)
+    if not match or not match.map or not match.map.spawns then
+        return nil
+    end
+    
+    local spawns = match.map.spawns
+    if #spawns == 0 then
+        return nil
+    end
+    
+    local playerTeam = GetPlayerTeam(match, playerId)
+    
+    -- FFA: any spawn point
+    if not playerTeam then
+        local ffaSpawns = {}
+        for _, spawn in ipairs(spawns) do
+            if not spawn.team then
+                table.insert(ffaSpawns, spawn)
+            end
+        end
+        -- If no FFA-specific spawns, use all spawns
+        if #ffaSpawns == 0 then
+            ffaSpawns = spawns
+        end
+        return ffaSpawns[math.random(1, #ffaSpawns)]
+    else
+        -- TDM/Team modes: spawn at team-specific spawn point
+        local teamSpawns = {}
+        for _, spawn in ipairs(spawns) do
+            if spawn.team == playerTeam then
+                table.insert(teamSpawns, spawn)
+            end
+        end
+        -- If no team-specific spawns, use all spawns
+        if #teamSpawns == 0 then
+            teamSpawns = spawns
+        end
+        return teamSpawns[math.random(1, #teamSpawns)]
+    end
+end
 
 -- Check if player is owner (has ACE permission)
 local function IsOwner(source)
@@ -317,6 +379,23 @@ function StartMatch(matchId)
     if not match then return end
 
     match.status = "active"
+    
+    -- Initialize scoring
+    match.playerScores = {}
+    match.teamScores = {}
+    match.deadPlayers = {}
+    
+    -- Initialize player scores
+    for _, playerId in ipairs(match.players) do
+        match.playerScores[playerId] = 0
+    end
+    
+    -- Initialize team scores
+    if match.gameMode.teams > 0 then
+        for i = 1, match.gameMode.teams do
+            match.teamScores[i] = 0
+        end
+    end
 
     -- Set routing buckets
     for _, playerId in ipairs(match.players) do
@@ -427,6 +506,11 @@ function EndMatch(matchId, reason)
         match.weaponHashes = nil
     end
 
+    -- Clear ghosted players for this match
+    for _, playerId in ipairs(match.players) do
+        ghostedPlayers[playerId] = nil
+    end
+    
     -- Cleanup all players
     for _, playerId in ipairs(match.players) do
         SetPlayerRoutingBucket(playerId, 0)
@@ -435,7 +519,21 @@ function EndMatch(matchId, reason)
         
         -- Only teleport to PED if match was ACTIVE when closed
         if wasActive then
-            TriggerClientEvent('envy_paintball:teleportToPed', playerId, Config.PedLocation.coords)
+            -- Revive player first (if dead) at current location, then teleport
+            local xPlayer = ESX.GetPlayerFromId(playerId)
+            if xPlayer then
+                -- Get player's current coords for revive
+                local playerCoords = GetEntityCoords(GetPlayerPed(playerId))
+                local playerHeading = GetEntityHeading(GetPlayerPed(playerId))
+                -- Revive player using our custom paintball revive (no screen fades)
+                TriggerClientEvent('envy_paintball:revive', playerId, playerCoords, playerHeading)
+            end
+            
+            -- Teleport after revive completes (our custom revive is instant, no fade)
+            CreateThread(function()
+                Wait(500) -- Brief wait for revive to process
+                TriggerClientEvent('envy_paintball:teleportToPed', playerId, Config.PedLocation.coords)
+            end)
         end
         
         TriggerClientEvent('envy_paintball:matchEnded', playerId)
@@ -848,7 +946,10 @@ RegisterNetEvent('envy_paintball:startMatch', function(gameModeId, mapId, isPriv
         pin = pin or nil,
         host = source,
         allowJoinInProgress = Config.AllowJoinInProgress,
-        playerWeapons = {}
+        playerWeapons = {},
+        playerScores = {}, -- Track individual player scores
+        teamScores = {}, -- Track team scores
+        deadPlayers = {} -- Track players waiting to respawn
     }
 
     -- Initialize teams
@@ -992,11 +1093,21 @@ RegisterNetEvent('envy_paintball:joinMatch', function(matchId, pin)
         end
         table.insert(match.teams[smallestTeam], source)
     end
+    
+    -- Initialize scoring for new player
+    if not match.playerScores then
+        match.playerScores = {}
+    end
+    match.playerScores[source] = 0
 
     -- If match is active, teleport and give weapon
     if match.status == "active" then
-        local spawnIndex = math.random(1, #match.map.spawns)
-        local spawn = match.map.spawns[spawnIndex]
+        local spawn = GetSpawnPointForPlayer(match, source)
+        if not spawn then
+            -- Fallback to random spawn
+            local spawnIndex = math.random(1, #match.map.spawns)
+            spawn = match.map.spawns[spawnIndex]
+        end
         TriggerClientEvent('envy_paintball:teleportToSpawn', source, spawn)
         
         local weaponHash = GetValidWeaponHash(source, match)
@@ -1459,8 +1570,38 @@ CreateThread(function()
     end
 end)
 
+-- Check win conditions
+local function CheckWinCondition(match)
+    local gameModeId = match.gameMode.id
+    
+    -- FFA: Check if any player reached score limit
+    if gameModeId == "ffa" then
+        for playerId, score in pairs(match.playerScores) do
+            if score >= Config.ScoreLimitFFA then
+                return true, playerId, nil
+            end
+        end
+    -- TDM: Check if any team reached score limit
+    elseif gameModeId == "tdm" then
+        for teamNum, score in pairs(match.teamScores) do
+            if score >= Config.ScoreLimitTDM then
+                return true, nil, teamNum
+            end
+        end
+    -- 1v1 and 2v2: Check if any player reached score limit
+    elseif gameModeId == "1v1_ramps" or gameModeId == "2v2_ramps" then
+        for playerId, score in pairs(match.playerScores) do
+            if score >= Config.ScoreLimit1v1 then
+                return true, playerId, nil
+            end
+        end
+    end
+    
+    return false, nil, nil
+end
+
 -- ============================================================================
--- KILL REWARDS
+-- KILL REWARDS AND SCORING
 -- ============================================================================
 
 RegisterNetEvent('esx:onPlayerDeath', function(data)
@@ -1478,10 +1619,159 @@ RegisterNetEvent('esx:onPlayerDeath', function(data)
     local match = activeMatches[victimMatchId]
     if not match or match.status ~= "active" then return end
     
+    -- Check if killer is on opposing team (for TDM)
+    local killerTeam = GetPlayerTeam(match, killerServerId)
+    local victimTeam = GetPlayerTeam(match, victimId)
+    
+    -- In TDM, only award points if killer is on opposing team
+    if match.gameMode.id == "tdm" then
+        if killerTeam == victimTeam or not killerTeam or not victimTeam then
+            -- Same team or invalid teams, don't award points
+            -- Still respawn the victim
+            match.deadPlayers[victimId] = true
+            CreateThread(function()
+                Wait(Config.RespawnDelay * 1000)
+                if match and match.status == "active" and match.deadPlayers[victimId] then
+                    RespawnPlayer(match, victimId)
+                end
+            end)
+            return
+        end
+    end
+    
+    -- Award points
+    local gameModeId = match.gameMode.id
+    
+    if gameModeId == "ffa" then
+        -- FFA: Award point to killer
+        if not match.playerScores[killerServerId] then
+            match.playerScores[killerServerId] = 0
+        end
+        match.playerScores[killerServerId] = match.playerScores[killerServerId] + Config.PointsPerKill
+        
+        -- Notify players
+        local xPlayer = ESX.GetPlayerFromId(killerServerId)
+        local killerName = xPlayer and xPlayer.getName() or "Unknown"
+        for _, playerId in ipairs(match.players) do
+            TriggerClientEvent('ESX:Notify', playerId, "info", 3000, string.format("%s scored! (%d/%d)", killerName, match.playerScores[killerServerId], Config.ScoreLimitFFA))
+        end
+        
+    elseif gameModeId == "tdm" then
+        -- TDM: Award point to killer's team
+        if killerTeam then
+            if not match.teamScores[killerTeam] then
+                match.teamScores[killerTeam] = 0
+            end
+            match.teamScores[killerTeam] = match.teamScores[killerTeam] + Config.PointsPerKill
+            
+            -- Notify players
+            for _, playerId in ipairs(match.players) do
+                local team1Score = match.teamScores[1] or 0
+                local team2Score = match.teamScores[2] or 0
+                TriggerClientEvent('ESX:Notify', playerId, "info", 3000, string.format("Team %d scored! (%d - %d)", killerTeam, team1Score, team2Score))
+            end
+        end
+        
+    elseif gameModeId == "1v1_ramps" or gameModeId == "2v2_ramps" then
+        -- 1v1/2v2: Award point to killer
+        if not match.playerScores[killerServerId] then
+            match.playerScores[killerServerId] = 0
+        end
+        match.playerScores[killerServerId] = match.playerScores[killerServerId] + Config.PointsPerKill
+        
+        -- Notify players
+        local xPlayer = ESX.GetPlayerFromId(killerServerId)
+        local killerName = xPlayer and xPlayer.getName() or "Unknown"
+        for _, playerId in ipairs(match.players) do
+            TriggerClientEvent('ESX:Notify', playerId, "info", 3000, string.format("%s scored! (%d/%d)", killerName, match.playerScores[killerServerId], Config.ScoreLimit1v1))
+        end
+    end
+    
     -- Reward ammo
     if match.weaponHashes and match.weaponHashes[killerServerId] then
         local weaponHash = match.weaponHashes[killerServerId]
         TriggerClientEvent('envy_paintball:rewardAmmoForKill', killerServerId, weaponHash, Config.AmmoPerKill)
+    end
+    
+    -- Mark victim as dead and schedule respawn
+    match.deadPlayers[victimId] = true
+    
+    CreateThread(function()
+        Wait(Config.RespawnDelay * 1000)
+        if match and match.status == "active" and match.deadPlayers[victimId] then
+            RespawnPlayer(match, victimId)
+        end
+    end)
+    
+    -- Check win condition
+    local hasWon, winnerPlayerId, winnerTeam = CheckWinCondition(match)
+    if hasWon then
+        if winnerPlayerId then
+            local xPlayer = ESX.GetPlayerFromId(winnerPlayerId)
+            local winnerName = xPlayer and xPlayer.getName() or "Unknown"
+            EndMatch(victimMatchId, string.format("%s won with %d points!", winnerName, match.playerScores[winnerPlayerId]))
+        elseif winnerTeam then
+            EndMatch(victimMatchId, string.format("Team %d won with %d points!", winnerTeam, match.teamScores[winnerTeam]))
+        end
+    end
+end)
+
+-- Respawn player function
+function RespawnPlayer(match, playerId)
+    if not match or match.status ~= "active" then return end
+    if not match.deadPlayers[playerId] then return end
+    
+    -- Get spawn point
+    local spawn = GetSpawnPointForPlayer(match, playerId)
+    if not spawn then
+        -- Fallback to random spawn
+        if match.map.spawns and #match.map.spawns > 0 then
+            spawn = match.map.spawns[math.random(1, #match.map.spawns)]
+        else
+            return
+        end
+    end
+    
+    -- Remove from dead players
+    match.deadPlayers[playerId] = nil
+    
+    -- Respawn player
+    TriggerClientEvent('envy_paintball:respawnPlayer', playerId, spawn)
+    
+    -- Mark player as ghosted on server
+    ghostedPlayers[playerId] = true
+    
+    -- Enable spawn protection ghosting for all players in match (wait a moment for respawn to process)
+    CreateThread(function()
+        Wait(500) -- Wait for respawn to fully process
+        -- Send updated ghost list to all players in match
+        for _, otherPlayerId in ipairs(match.players) do
+            TriggerClientEvent('envy_paintball:updateGhostedPlayers', otherPlayerId, ghostedPlayers)
+        end
+    end)
+    
+    -- Give weapon back (wait a moment for client to process respawn)
+    CreateThread(function()
+        Wait(500)
+        if match and match.status == "active" and match.weaponHashes and match.weaponHashes[playerId] then
+            local weaponHash = match.weaponHashes[playerId]
+            GivePaintballWeapon(playerId, weaponHash, Config.PaintballAmmo)
+        end
+    end)
+end
+
+-- Handle spawn protection ending
+RegisterNetEvent('envy_paintball:spawnProtectionEnded', function()
+    local source = source
+    local match, matchId = GetPlayerMatch(source)
+    if not match or match.status ~= "active" then return end
+    
+    -- Remove player from ghosted list
+    ghostedPlayers[source] = nil
+    
+    -- Send updated ghost list to all players in match
+    for _, playerId in ipairs(match.players) do
+        TriggerClientEvent('envy_paintball:updateGhostedPlayers', playerId, ghostedPlayers)
     end
 end)
 

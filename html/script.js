@@ -626,6 +626,90 @@ const Components = {
 // ============================================================================
 // PRESS E UI MANAGER
 // ============================================================================
+// ============================================================================
+// SCOREBOARD MANAGER
+// ============================================================================
+const ScoreboardManager = {
+    scoreboardElement: null,
+    titleElement: null,
+    bodyElement: null,
+    
+    init() {
+        this.scoreboardElement = document.getElementById('scoreboard-ui');
+        this.titleElement = document.getElementById('scoreboard-title');
+        this.bodyElement = document.getElementById('scoreboard-body');
+    },
+    
+    show(scoreData) {
+        if (!this.scoreboardElement || !scoreData) return;
+        
+        // Update title based on game mode
+        if (this.titleElement) {
+            const gameModeName = scoreData.gameModeName || 'Scoreboard';
+            this.titleElement.textContent = gameModeName;
+        }
+        
+        // Clear and rebuild scoreboard body
+        if (this.bodyElement) {
+            this.bodyElement.innerHTML = '';
+            
+            if (scoreData.gameModeId === 'tdm') {
+                // TDM: Show team scores
+                this.bodyElement.innerHTML = `
+                    <div class="scoreboard-team-header">Team 1</div>
+                    <div class="scoreboard-item team-item">
+                        <span class="scoreboard-item-name">Team 1</span>
+                        <span class="scoreboard-item-score">${scoreData.teamScores[1] || 0}</span>
+                    </div>
+                    <div class="scoreboard-team-header">Team 2</div>
+                    <div class="scoreboard-item team-item">
+                        <span class="scoreboard-item-name">Team 2</span>
+                        <span class="scoreboard-item-score">${scoreData.teamScores[2] || 0}</span>
+                    </div>
+                `;
+            } else {
+                // FFA/1v1/2v2: Show individual player scores
+                const players = scoreData.players || [];
+                // Sort by score (descending)
+                const sortedPlayers = [...players].sort((a, b) => (b.score || 0) - (a.score || 0));
+                
+                sortedPlayers.forEach((player, index) => {
+                    const item = document.createElement('div');
+                    item.className = 'scoreboard-item';
+                    if (index === 0 && sortedPlayers.length > 1) {
+                        item.style.borderColor = 'var(--color-accent)';
+                        item.style.background = 'linear-gradient(90deg, rgba(0, 255, 255, 0.15) 0%, var(--color-bg-tertiary) 100%)';
+                    }
+                    item.innerHTML = `
+                        <span class="scoreboard-item-name">${this.escapeHtml(player.name || 'Unknown')}</span>
+                        <span class="scoreboard-item-score">${player.score || 0}</span>
+                    `;
+                    this.bodyElement.appendChild(item);
+                });
+            }
+            
+            // Add scrollbar class
+            this.bodyElement.classList.add('scoreboard-scrollbar');
+        }
+        
+        // Show scoreboard
+        this.scoreboardElement.classList.remove('hidden');
+        this.scoreboardElement.classList.add('active');
+    },
+    
+    hide() {
+        if (!this.scoreboardElement) return;
+        this.scoreboardElement.classList.remove('active');
+        this.scoreboardElement.classList.add('hidden');
+    },
+    
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+};
+
 const PressEUIManager = {
     element: null,
     textElement: null,
@@ -2601,6 +2685,12 @@ window.addEventListener('message', function(event) {
         case 'showAdminDashboard':
             MenuHandlers.displayAdminDashboard(data);
             break;
+        case 'updateScoreboard':
+            ScoreboardManager.show(data);
+            break;
+        case 'hideScoreboard':
+            ScoreboardManager.hide();
+            break;
     }
 });
 
@@ -2610,6 +2700,7 @@ window.addEventListener('message', function(event) {
 function init() {
     MenuManager.init();
     PressEUIManager.init();
+    ScoreboardManager.init();
 
 // Notify NUI ready
 function notifyNUIReady() {

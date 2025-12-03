@@ -27,6 +27,9 @@ local boundaryZone = nil
 local editorZone = nil
 local previewZone = nil
 local zoneDrawThreads = {} -- Track threads that draw zones
+local spawnProtected = false
+local spawnProtectionTime = 0
+local isDead = false
 
 -- Export for OX Inventory
 exports('IsInPaintball', function()
@@ -916,6 +919,24 @@ RegisterNetEvent('envy_paintball:matchEnded', function()
     paintballWeaponHash = nil
     weaponGiven = false
     
+    local ped = PlayerPedId()
+    
+    -- Clear any ongoing animations
+    ClearPedTasksImmediately(ped)
+    
+    -- Disable spawn protection and restore opacity
+    if spawnProtected then
+        spawnProtected = false
+        SetEntityInvincible(ped, false)
+        ResetEntityAlpha(ped) -- Restore full opacity
+        TriggerServerEvent('envy_paintball:spawnProtectionEnded') -- Notify server
+    end
+    
+    -- Clear all ghosting (server will handle cleanup, but clear locally too)
+    ghostedPlayers = {}
+    
+    isDead = false
+    
     -- Destroy boundary zone
     destroyBoundaryZone()
     
@@ -946,14 +967,13 @@ RegisterNetEvent('envy_paintball:matchUpdated', function(matchData)
 end)
 
 RegisterNetEvent('envy_paintball:giveWeapon', function(weaponHash, ammo)
-    if weaponGiven then return end
-    
     local ped = PlayerPedId()
     if not weaponHash then return end
     
     local ammoAmount = ammo or Config.PaintballAmmo
     paintballWeaponHash = weaponHash
     
+    -- Give weapon (allow on respawn, so don't check weaponGiven)
     GiveWeaponToPed(ped, weaponHash, ammoAmount, false, true)
     SetCurrentPedWeapon(ped, weaponHash, true)
     SetPedAmmo(ped, weaponHash, ammoAmount)
@@ -985,16 +1005,325 @@ RegisterNetEvent('envy_paintball:rewardAmmoForKill', function(weaponHash, ammoRe
     ESX.ShowNotification(string.format("+%d Ammo (Total: %d/%d)", ammoReward, newAmmo, Config.MaxAmmo), "success")
 end)
 
+-- Track if we're already teleporting to prevent multiple teleports
+local isTeleportingToPed = false
+
 RegisterNetEvent('envy_paintball:teleportToPed', function(coords)
+    -- Prevent multiple teleports
+    if isTeleportingToPed then return end
+    isTeleportingToPed = true
+    
     local ped = PlayerPedId()
-    SetEntityCoordsNoOffset(ped, coords.x, coords.y, coords.z, false, false, false)
+    
+    -- Clear any ongoing animations
+    ClearPedTasksImmediately(ped)
+    
+    -- Wait a moment to ensure revive has completed
+    Wait(500)
+    
+    -- Use SetEntityCoords with all flags to ensure proper teleportation
+    SetEntityCoords(ped, coords.x, coords.y, coords.z, false, false, false, true)
     SetEntityHeading(ped, coords.w or 0.0)
+    
+    -- Ensure player stays at this location (prevent ESX from restoring position)
+    -- Only teleport once more if needed, not repeatedly
+    CreateThread(function()
+        local targetCoords = vector3(coords.x, coords.y, coords.z)
+        local teleportedOnce = false
+        -- Check once after a short delay, and only teleport back if moved
+        Wait(1000)
+        local currentCoords = GetEntityCoords(ped)
+        local distance = #(currentCoords - targetCoords)
+        if distance > 2.0 and not teleportedOnce then
+            -- Player was moved, teleport back ONCE
+            SetEntityCoords(ped, coords.x, coords.y, coords.z, false, false, false, true)
+            SetEntityHeading(ped, coords.w or 0.0)
+            teleportedOnce = true
+        end
+        
+        -- Reset flag after monitoring is done
+        Wait(2000)
+        isTeleportingToPed = false
+    end)
 end)
 
 RegisterNetEvent('envy_paintball:teleportToSpawn', function(spawn)
     local ped = PlayerPedId()
     SetEntityCoords(ped, spawn.x, spawn.y, spawn.z, false, false, false, true)
     SetEntityHeading(ped, spawn.w or 0.0)
+end)
+
+-- Track which players are ghosted (store ped references like the forum example)
+local ghostedPlayers = {}
+
+-- Update ghosted players list from server
+RegisterNetEvent('envy_paintball:updateGhostedPlayers', function(serverGhostedList)
+    if not inMatch then return end
+    
+    -- Get list of players that were ghosted before
+    local previouslyGhosted = {}
+    for playerId, _ in pairs(ghostedPlayers) do
+        previouslyGhosted[playerId] = true
+    end
+    
+    -- Clear current list
+    ghostedPlayers = {}
+    
+    -- Update with server data - get ped references
+    if serverGhostedList then
+        for playerId, _ in pairs(serverGhostedList) do
+            local targetPlayer = GetPlayerFromServerId(playerId)
+            if targetPlayer ~= -1 then
+                local targetPed = GetPlayerPed(targetPlayer)
+                if DoesEntityExist(targetPed) then
+                    ghostedPlayers[playerId] = targetPed
+                end
+            end
+        end
+    end
+    
+    -- Reset alpha for players that are no longer ghosted
+    for playerId, _ in pairs(previouslyGhosted) do
+        if not ghostedPlayers[playerId] then
+            local targetPlayer = GetPlayerFromServerId(playerId)
+            if targetPlayer ~= -1 then
+                local targetPed = GetPlayerPed(targetPlayer)
+                if DoesEntityExist(targetPed) then
+                    ResetEntityAlpha(targetPed)
+                end
+            end
+        end
+    end
+end)
+
+-- Continuously apply ghosting to players (every frame like the forum example)
+CreateThread(function()
+    while true do
+        Wait(0) -- Every frame for maximum visibility
+        
+        if inMatch then
+            -- Continuously apply alpha to all ghosted players
+            for playerId, ped in pairs(ghostedPlayers) do
+                if DoesEntityExist(ped) then
+                    SetEntityAlpha(ped, 150, false) -- Semi-transparent
+                else
+                    -- Ped no longer exists, try to get it again
+                    local targetPlayer = GetPlayerFromServerId(playerId)
+                    if targetPlayer ~= -1 then
+                        local newPed = GetPlayerPed(targetPlayer)
+                        if DoesEntityExist(newPed) then
+                            ghostedPlayers[playerId] = newPed
+                        else
+                            -- Player might have left, remove from list
+                            ghostedPlayers[playerId] = nil
+                        end
+                    else
+                        -- Player not found, remove from list
+                        ghostedPlayers[playerId] = nil
+                    end
+                end
+            end
+            
+            -- Reset alpha for players NOT in ghosted list (ensure they're fully visible)
+            if activeMatchData and activeMatchData.players then
+                local myServerId = GetPlayerServerId(PlayerId())
+                for _, playerId in ipairs(activeMatchData.players) do
+                    if not ghostedPlayers[playerId] and playerId ~= myServerId then
+                        local targetPlayer = GetPlayerFromServerId(playerId)
+                        if targetPlayer ~= -1 then
+                            local targetPed = GetPlayerPed(targetPlayer)
+                            if DoesEntityExist(targetPed) then
+                                ResetEntityAlpha(targetPed)
+                            end
+                        end
+                    end
+                end
+            end
+        else
+            -- Clear all ghosting when not in match
+            if next(ghostedPlayers) then
+                for playerId, ped in pairs(ghostedPlayers) do
+                    if DoesEntityExist(ped) then
+                        ResetEntityAlpha(ped)
+                    end
+                end
+                ghostedPlayers = {}
+            end
+        end
+    end
+end)
+
+-- Handle player death (listen to ESX death event when in paintball match)
+AddEventHandler('esx:onPlayerDeath', function(data)
+    if not inMatch then return end
+    
+    isDead = true
+    local ped = PlayerPedId()
+    
+    -- Server already received the esx:onPlayerDeath event and will handle scoring/respawn
+    -- We just track the death state locally for respawn handling
+end)
+
+-- Respawn ped function (simplified version for paintball)
+function RespawnPed(ped, coords, heading, setInvincible)
+    -- Handle both vector3 and vector4, or table with x,y,z
+    local x, y, z
+    if type(coords) == "table" then
+        if coords.x and coords.y and coords.z then
+            x, y, z = coords.x, coords.y, coords.z
+        else
+            -- Fallback: try to extract from array
+            x, y, z = coords[1] or 0.0, coords[2] or 0.0, coords[3] or 0.0
+        end
+    else
+        -- Fallback
+        local currentCoords = GetEntityCoords(ped)
+        x, y, z = currentCoords.x, currentCoords.y, currentCoords.z
+    end
+    
+    -- Find ground Z to prevent spawning underground
+    local found, groundZ = GetGroundZFor_3dCoord(x, y, z, false)
+    if found then
+        z = groundZ + 1.0 -- Add 1.0 to ensure we're above ground
+    end
+    
+    local h = heading or 0.0
+    
+    -- Resurrect first, then set position
+    NetworkResurrectLocalPlayer(x, y, z, h, true, false)
+    SetEntityCoordsNoOffset(ped, x, y, z, false, false, false)
+    SetEntityHeading(ped, h)
+    
+    -- Explicitly unfreeze player (in case they were frozen from death/previous state)
+    FreezeEntityPosition(ped, false)
+    
+    -- Only set invincible to false if not explicitly told to keep it
+    if setInvincible ~= true then
+        SetEntityInvincible(ped, false)
+    end
+    
+    ClearPedBloodDamage(ped)
+    
+    -- Ensure ped can move and ragdoll
+    SetPedCanRagdoll(ped, true)
+    SetBlockingOfNonTemporaryEvents(ped, false)
+
+    TriggerEvent('esx_basicneeds:resetStatus')
+    TriggerServerEvent('esx:onPlayerSpawn')
+    TriggerEvent('esx:onPlayerSpawn')
+    TriggerEvent('playerSpawned') -- compatibility with old scripts, will be removed soon
+end
+
+-- Custom revive function for paintball (no screen fades, no death cam, just revive)
+function PaintballRevive(ped, coords, heading, keepInvincible)
+    -- Set death status to false
+    TriggerServerEvent('esx_ambulancejob:setDeathStatus', false)
+    
+    -- Resurrect player at spawn location (keepInvincible = true means don't set invincible to false)
+    RespawnPed(ped, coords, heading, keepInvincible)
+    
+    ClearTimecycleModifier()
+    SetPedMotionBlur(ped, false)
+    ClearExtraTimecycleModifier()
+    -- Reset death state
+    isDead = false
+end
+
+-- Custom revive event for paintball (works in or out of match)
+RegisterNetEvent('envy_paintball:revive')
+AddEventHandler('envy_paintball:revive', function(coords, heading)
+    local ped = PlayerPedId()
+    -- If coords provided, use it; otherwise use current coords
+    local reviveCoords = coords
+    if not reviveCoords then
+        reviveCoords = GetEntityCoords(ped)
+    end
+    PaintballRevive(ped, reviveCoords, heading or GetEntityHeading(ped))
+end)
+
+-- Handle respawn
+RegisterNetEvent('envy_paintball:respawnPlayer', function(spawn)
+    if not inMatch then return end
+    
+    local ped = PlayerPedId()
+    
+    -- Explicitly unfreeze player first (in case they were frozen from death/previous state)
+    FreezeEntityPosition(ped, false)
+    
+    -- Revive player at spawn location using our custom revive (keepInvincible = true)
+    PaintballRevive(ped, spawn, spawn.w or 0.0, true)
+    
+    -- Ensure player is unfrozen after revive
+    FreezeEntityPosition(ped, false)
+    
+    -- IMMEDIATELY enable spawn protection after revive
+    spawnProtected = true
+    spawnProtectionTime = GetGameTimer()
+    SetEntityInvincible(ped, true) -- Godmode
+    
+    -- Make player transparent (ghosted) but keep collision so shots can hit
+    -- Set alpha locally - server will notify other clients and continuous loop will maintain it
+    SetEntityAlpha(ped, 150, false) -- 150/255 = semi-transparent
+    
+    -- Start spawn protection thread IMMEDIATELY (runs in parallel with animation)
+    CreateThread(function()
+        local startTime = GetGameTimer()
+        local protectionDuration = Config.SpawnProtectionTime * 1000
+        
+        while spawnProtected do
+            Wait(0)
+            local currentTime = GetGameTimer()
+            local elapsed = currentTime - startTime
+            
+            -- Check if player shot (disable protection)
+            if IsPedShooting(ped) then
+                spawnProtected = false
+                SetEntityInvincible(ped, false)
+                
+                -- Remove self from ghosted list immediately
+                local myServerId = GetPlayerServerId(PlayerId())
+                ghostedPlayers[myServerId] = nil
+                
+                ResetEntityAlpha(ped) -- Restore full opacity
+                TriggerServerEvent('envy_paintball:spawnProtectionEnded') -- Notify server to update other clients
+                ESX.ShowNotification("~r~Spawn protection removed!~s~", "info", 2000)
+                break
+            end
+            
+            -- Check if time expired
+            if elapsed >= protectionDuration then
+                spawnProtected = false
+                SetEntityInvincible(ped, false)
+                
+                -- Remove self from ghosted list immediately
+                local myServerId = GetPlayerServerId(PlayerId())
+                ghostedPlayers[myServerId] = nil
+                
+                ResetEntityAlpha(ped) -- Restore full opacity
+                TriggerServerEvent('envy_paintball:spawnProtectionEnded') -- Notify server to update other clients
+                ESX.ShowNotification("~g~Spawn protection expired!~s~", "info", 2000)
+                break
+            end
+            
+            -- Visual indicator for spawn protection
+            local remaining = math.ceil((protectionDuration - elapsed) / 1000)
+            if remaining > 0 then
+                DrawText2D(0.5, 0.85, string.format("~y~Spawn Protection: %d seconds~s~", remaining), 0.4)
+            end
+        end
+    end)
+    
+    -- Play getting up animation (runs in parallel with spawn protection)
+    ESX.Streaming.RequestAnimDict("get_up@directional@movement@from_knees@action")
+    while not HasAnimDictLoaded("get_up@directional@movement@from_knees@action") do
+        Wait(100)
+    end
+    
+    -- Play animation
+    TaskPlayAnim(ped, "get_up@directional@movement@from_knees@action", "getup_l_0", 7.0, -7.0, -1, 0, 0, false, false, false)
+
+    Wait(500)
+    StopAnimTask(ped, "get_up@directional@movement@from_knees@action", "getup_l_0", 1.0)
 end)
 
 RegisterNetEvent('envy_paintball:openWeaponConfig', function()

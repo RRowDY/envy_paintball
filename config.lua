@@ -65,12 +65,23 @@ Config.MaxAmmo = 500 -- Maximum ammo cap
 
 -- Match Settings
 Config.MatchDuration = 600 -- 10 minutes in seconds
-Config.RespawnTime = 5 -- Seconds to respawn
-Config.KillLimit = 20 -- Kill limit for TDM/FFA
+Config.RespawnTime = 3 -- Seconds to respawn (changed from 5 to 3)
+Config.KillLimit = 20 -- Kill limit for TDM/FFA (deprecated, using score limits instead)
 Config.MatchWaitTime = 30 -- Seconds to wait for players before starting
 Config.AllowJoinInProgress = false -- Allow joining matches that are already in progress
 Config.BaseBucket = 10000 -- Starting bucket ID for matches
 Config.BucketIncrement = 1000 -- Increment per game mode
+
+-- Scoring Settings
+Config.ScoreLimitFFA = 5 -- First to 30 points wins in FFA
+Config.ScoreLimitTDM = 5 -- First team to 60 points wins in TDM
+Config.ScoreLimit1v1 = 5 -- First to 10 points wins in 1v1
+Config.ScoreLimit2v2 = 5 -- First to 10 points wins in 2v2
+Config.PointsPerKill = 1 -- Points awarded per kill
+
+-- Respawn Settings
+Config.RespawnDelay = 1 -- Seconds before respawning after death
+Config.SpawnProtectionTime = 5 -- Seconds of spawn protection (or until player shoots)
 
 -- Map Editor Settings (Admin only)
 Config.AdminGroups = {"admin", "owner"} -- ESX job groups that can use map editor
