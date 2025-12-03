@@ -516,8 +516,8 @@ const Components = {
         item.appendChild(titleEl);
         
         if (description) {
-            const descEl = document.createElement('div');
-            descEl.className = 'menu-item-description';
+        const descEl = document.createElement('div');
+        descEl.className = 'menu-item-description';
             descEl.textContent = description;
             item.appendChild(descEl);
         }
@@ -555,7 +555,7 @@ const Components = {
         const input = document.createElement('input');
         input.type = options.type || 'text';
         input.className = 'dialog-input';
-        input.placeholder = placeholder;
+    input.placeholder = placeholder;
         
         if (options.value) input.value = options.value;
         if (options.maxLength) input.maxLength = options.maxLength;
@@ -672,7 +672,7 @@ const MenuHandlers = {
                 { disabled: true, style: { cursor: 'default', opacity: '0.6' } }
             );
             content.appendChild(item);
-                } else {
+            } else {
             maps.forEach(map => {
                 const item = Components.createMenuItem(
                     map.name,
@@ -691,7 +691,7 @@ const MenuHandlers = {
                             MenuManager.isNavigating = false;
                             MenuManager.hide(MENU_IDS.MAP);
                             Utils.sendNuiCallback('loadMapForEdit', { mapId: map.id });
-                        } else {
+                } else {
                             // Selecting map for match - navigating to match settings
                             MenuManager.isNavigating = true;
                             MenuManager.hide(MENU_IDS.MAP, { checkFocusRelease: false });
@@ -956,7 +956,7 @@ const MenuHandlers = {
             const item = Components.createMenuItem(
                 itemData.title,
                 itemData.description,
-                () => {
+        () => {
                     if (['createNewMap', 'editMap', 'deleteMap'].includes(itemData.action)) {
                         // "Edit Map" and "Delete Map" navigate to maps menu - set navigation flag
                         // "Create New Map" closes UI to start editor - don't set navigation flag
@@ -1024,7 +1024,7 @@ const MenuHandlers = {
                         // Just hide the menu - don't set navigation flag here
                         // The client will send hideMenu and manage focus explicitly
                         MenuManager.hide(MENU_IDS.EDITOR, { checkFocusRelease: false });
-                    } else {
+                } else {
                         // Actions that close UI (setCenter, leaveEditor)
                         MenuManager.isNavigating = false;
                         MenuManager.hide(MENU_IDS.EDITOR);

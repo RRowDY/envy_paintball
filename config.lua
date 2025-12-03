@@ -3,7 +3,7 @@ Config = {}
 -- PED Configuration
 Config.PedLocation = {
     coords = vector4(186.646149, -858.171448, 31.318726, 136.062988), -- Change these coordinates to where you want the PED
-    model = `s_m_y_swat_01`, -- SWAT model, change if desired
+    model = `a_m_m_hasjew_01`, -- SWAT model, change if desired
     scenario = "WORLD_HUMAN_CLIPBOARD" -- Animation scenario
 }
 

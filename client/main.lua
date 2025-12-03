@@ -25,6 +25,8 @@ local paintballWeaponHash = nil
 local weaponGiven = false
 local boundaryZone = nil
 local editorZone = nil
+local previewZone = nil
+local zoneDrawThreads = {} -- Track threads that draw zones
 
 -- Export for OX Inventory
 exports('IsInPaintball', function()
@@ -240,11 +242,30 @@ end
 -- MAP EDITOR HELPER FUNCTIONS
 -- ============================================================================
 
+local function startZoneDrawThread(zone, zoneKey)
+    -- Stop existing thread if any
+    if zoneDrawThreads[zoneKey] then
+        zoneDrawThreads[zoneKey] = nil
+    end
+    
+    -- Start new thread to always draw the zone (similar to PolyZone's /zone command)
+    zoneDrawThreads[zoneKey] = CreateThread(function()
+        while zone and not zone.destroyed do
+            zone:draw(true) -- Force draw regardless of debugPoly setting
+            Wait(0)
+        end
+        zoneDrawThreads[zoneKey] = nil
+    end)
+end
+
 local function updateEditorZone()
     -- Destroy existing editor zone if any
     if editorZone then
         editorZone:destroy()
         editorZone = nil
+        if zoneDrawThreads['editor'] then
+            zoneDrawThreads['editor'] = nil
+        end
     end
     
     -- Create new zone if center and radius are set
@@ -258,11 +279,73 @@ local function updateEditorZone()
             editorZone = CircleZone:Create(centerVec3, radius, {
                 name = "paintball_editor_zone",
                 useZ = true, -- Enable 3D sphere visualization
-                debugPoly = true, -- Make it visible
+                debugPoly = false, -- Don't use PolyZone's debug mode, we'll draw manually
                 debugColor = {0, 255, 0, 30} -- Green color with transparency for editor
             })
+            
+            -- Start thread to always draw this zone
+            startZoneDrawThread(editorZone, 'editor')
         end
     end
+end
+
+local lastPreviewPosition = nil
+local lastPreviewRadius = nil
+local previewZoneUpdateTimer = 0
+
+local function updatePreviewZone(position, radius, forceUpdate)
+    -- Only update if position or radius changed significantly (avoid recreating every frame)
+    local needsUpdate = false
+    local currentTime = GetGameTimer()
+    
+    if not previewZone then
+        needsUpdate = true
+    elseif not lastPreviewPosition or not lastPreviewRadius then
+        needsUpdate = true
+    else
+        local distChange = #(position - lastPreviewPosition)
+        local radiusChange = math.abs(radius - lastPreviewRadius)
+        -- Update if position changed by more than 0.5m or radius changed by more than 0.1m
+        -- Also add a small debounce (50ms) to prevent rapid destroy/recreate during fast scrolling
+        if forceUpdate or distChange > 0.5 or (radiusChange > 0.1 and (currentTime - previewZoneUpdateTimer) > 50) then
+            needsUpdate = true
+        end
+    end
+    
+    if needsUpdate and position and radius and radius > 0 then
+        -- Destroy existing preview zone if any
+        if previewZone then
+            previewZone:destroy()
+            previewZone = nil
+        end
+        
+        -- Create preview zone
+        previewZone = CircleZone:Create(position, radius, {
+            name = "paintball_preview_zone",
+            useZ = true, -- Enable 3D sphere visualization
+            debugPoly = false, -- Don't use PolyZone's debug mode, we'll draw manually
+            debugColor = {0, 255, 0, 30} -- Green color with transparency for preview
+        })
+        
+        -- Start thread to always draw this zone
+        startZoneDrawThread(previewZone, 'preview')
+        
+        lastPreviewPosition = position
+        lastPreviewRadius = radius
+        previewZoneUpdateTimer = currentTime
+    end
+end
+
+local function destroyPreviewZone()
+    if previewZone then
+        previewZone:destroy()
+        previewZone = nil
+        if zoneDrawThreads['preview'] then
+            zoneDrawThreads['preview'] = nil
+        end
+    end
+    lastPreviewPosition = nil
+    lastPreviewRadius = nil
 end
 
 -- ============================================================================
@@ -597,15 +680,21 @@ local function createBoundaryZone(matchData)
     if boundaryZone then
         boundaryZone:destroy()
         boundaryZone = nil
+        if zoneDrawThreads['boundary'] then
+            zoneDrawThreads['boundary'] = nil
+        end
     end
     
     -- Create new CircleZone with sphere visualization
     boundaryZone = CircleZone:Create(centerVec3, radius, {
         name = "paintball_boundary",
         useZ = true, -- Enable 3D sphere instead of 2D circle
-        debugPoly = true, -- Make it visible to players
+        debugPoly = false, -- Don't use PolyZone's debug mode, we'll draw manually
         debugColor = {255, 0, 0, 48} -- Red color with transparency
     })
+    
+    -- Start thread to always draw this zone
+    startZoneDrawThread(boundaryZone, 'boundary')
     
     -- Handle player entering/exiting the zone
     boundaryZone:onPlayerInOut(function(isInside, point)
@@ -659,6 +748,9 @@ local function destroyBoundaryZone()
     if boundaryZone then
         boundaryZone:destroy()
         boundaryZone = nil
+        if zoneDrawThreads['boundary'] then
+            zoneDrawThreads['boundary'] = nil
+        end
     end
 end
 
@@ -1202,9 +1294,9 @@ function StartMapEditor()
                     DrawMarker(27, aimPosition.x, aimPosition.y, aimPosition.z, 0.0, 0.0, 0.0, 0.0, 180.0, 0.0, 0.5, 0.5, 0.1, markerColor[1], markerColor[2], markerColor[3], 255, false, false, 2, false, false, false, false)
                     
                     if placingType == "center" then
-                        -- Show preview zone using PolyZone-style visualization
-                        local radiusSize = currentMapData.radius * 2.0
-                        DrawMarker(28, aimPosition.x, aimPosition.y, aimPosition.z, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, radiusSize, radiusSize, radiusSize, 0, 255, 0, 30, false, true, 2, false, false, false, false)
+                        -- Update preview zone using PolyZone CircleZone (only updates when position/radius changes significantly)
+                        local previewPosition = vector3(aimPosition.x, aimPosition.y, aimPosition.z)
+                        updatePreviewZone(previewPosition, currentMapData.radius, false)
                     end
                     
                     local placeText = ""
@@ -1223,12 +1315,22 @@ function StartMapEditor()
                 if placingType == "center" then
                     if IsDisabledControlJustPressed(0, 17) then
                         currentMapData.radius = math.min(currentMapData.radius + 1.0, 200.0)
+                        -- Update preview zone if placing center (force update on scroll)
+                        if aimPosition then
+                            local previewPosition = vector3(aimPosition.x, aimPosition.y, aimPosition.z)
+                            updatePreviewZone(previewPosition, currentMapData.radius, true)
+                        end
                         -- Update zone if center is already placed
                         if currentMapData.center then
                             updateEditorZone()
                         end
                     elseif IsDisabledControlJustPressed(0, 16) then
                         currentMapData.radius = math.max(currentMapData.radius - 1.0, 5.0)
+                        -- Update preview zone if placing center (force update on scroll)
+                        if aimPosition then
+                            local previewPosition = vector3(aimPosition.x, aimPosition.y, aimPosition.z)
+                            updatePreviewZone(previewPosition, currentMapData.radius, true)
+                        end
                         -- Update zone if center is already placed
                         if currentMapData.center then
                             updateEditorZone()
@@ -1250,7 +1352,8 @@ function StartMapEditor()
                             ESX.ShowNotification("~g~✓ Center point placed!~s~", "success", 3000)
                             placingPoint = false
                             placingType = nil
-                            -- Create/update the editor zone
+                            -- Destroy preview zone and create/update the editor zone
+                            destroyPreviewZone()
                             updateEditorZone()
                         elseif placingType == "spawn" then
                             -- Validate spawn point is inside zone
@@ -1316,6 +1419,7 @@ function StartMapEditor()
                     placingPoint = false
                     placingType = nil
                     selectedTeam = nil
+                    destroyPreviewZone()
                     ESX.ShowNotification("Placement cancelled", "info", 3000)
                 end
             end
@@ -1488,11 +1592,12 @@ function StopMapEditor()
     StopFreecam()
     currentMapData = nil
     
-    -- Destroy editor zone
+    -- Destroy editor zone and preview zone
     if editorZone then
         editorZone:destroy()
         editorZone = nil
     end
+    destroyPreviewZone()
     
     SendNUIMessage({ action = 'hideMenu' })
     SetNuiFocus(false, false)
@@ -1577,6 +1682,9 @@ function ClearMapData()
         radius = 50.0,
         spawns = {}
     }
+    -- Destroy preview zone and editor zone when clearing map data
+    destroyPreviewZone()
+    updateEditorZone() -- This will destroy the editor zone since center is now nil
     ESX.ShowNotification("Map data cleared!", "info", 3000)
 end
 
