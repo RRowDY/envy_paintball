@@ -1,5 +1,85 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
+/* ============================================================================
+   CSS VARIABLES - THEME SYSTEM
+   ============================================================================ */
+:root {
+    /* Colors */
+    --color-primary: #0987ff;
+    --color-primary-hover: rgba(9, 135, 255, 1);
+    --color-primary-light: rgba(9, 135, 255, 0.3);
+    --color-primary-dark: rgba(9, 135, 255, 0.2);
+    
+    --color-accent: #00ffff;
+    --color-accent-light: rgba(0, 255, 255, 0.3);
+    --color-accent-dark: rgba(0, 255, 255, 0.2);
+    
+    --color-error: #ff4444;
+    --color-error-light: rgba(255, 68, 68, 0.1);
+    --color-warning: #ffb800;
+    --color-success: #44ff44;
+    
+    --color-bg-primary: rgba(15, 15, 15, 0.98);
+    --color-bg-secondary: rgba(20, 20, 20, 0.98);
+    --color-bg-tertiary: rgba(30, 30, 30, 0.6);
+    --color-bg-tertiary-hover: rgba(30, 30, 30, 0.8);
+    --color-bg-overlay: rgba(0, 0, 0, 0.15);
+    --color-bg-overlay-dark: rgba(0, 0, 0, 0.35);
+    
+    --color-text-primary: #FFFFFF;
+    --color-text-secondary: #AAAAAA;
+    --color-text-tertiary: #888888;
+    --color-text-placeholder: #666666;
+    
+    --color-border-primary: rgba(9, 135, 255, 0.3);
+    --color-border-secondary: rgba(255, 255, 255, 0.2);
+    --color-border-accent: rgba(0, 255, 255, 0.2);
+    
+    /* Spacing */
+    --spacing-xs: 4px;
+    --spacing-sm: 8px;
+    --spacing-md: 12px;
+    --spacing-lg: 16px;
+    --spacing-xl: 20px;
+    --spacing-xxl: 24px;
+    
+    /* Border Radius */
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 8px;
+    --radius-xl: 12px;
+    
+    /* Shadows */
+    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.5);
+    --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.4);
+    --shadow-primary: 0 4px 12px rgba(9, 135, 255, 0.2);
+    --shadow-primary-hover: 0 4px 12px rgba(9, 135, 255, 0.3);
+    --shadow-accent: 0 0 12px rgba(0, 255, 255, 0.5);
+    
+    /* Transitions */
+    --transition-fast: 0.1s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    --transition-normal: 0.2s ease;
+    --transition-smooth: 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
+    
+    /* Typography */
+    --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-size-xs: 11px;
+    --font-size-sm: 13px;
+    --font-size-base: 14px;
+    --font-size-md: 15px;
+    --font-size-lg: 16px;
+    --font-size-xl: 20px;
+    
+    /* Z-Index */
+    --z-base: 999999;
+    --z-dialog: 1000000;
+    --z-press-e: 1000;
+}
+
+/* ============================================================================
+   RESET & BASE STYLES
+   ============================================================================ */
 * {
     margin: 0;
     padding: 0;
@@ -7,19 +87,22 @@
 }
 
 body {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-family: var(--font-family);
     overflow: hidden;
     width: 100vw;
     height: 100vh;
     background: transparent;
-    color: #FFFFFF;
+    color: var(--color-text-primary);
 }
 
-/* Ensure all text elements default to white unless explicitly styled */
+/* Ensure all text elements default to white */
 div, span, p, h1, h2, h3, h4, h5, h6, label, li, td, th {
-    color: #FFFFFF;
+    color: var(--color-text-primary);
 }
 
+/* ============================================================================
+   MENU SYSTEM
+   ============================================================================ */
 .paintball-ui {
     position: fixed;
     top: 0;
@@ -29,21 +112,16 @@ div, span, p, h1, h2, h3, h4, h5, h6, label, li, td, th {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: radial-gradient(circle at center, rgba(0, 0, 0, 0.15) 0%, rgba(0, 0, 0, 0.35) 100%);
-    z-index: 999999;
+    background: radial-gradient(circle at center, var(--color-bg-overlay) 0%, var(--color-bg-overlay-dark) 100%);
+    z-index: var(--z-base);
     opacity: 0;
-    transition: opacity 0.2s ease;
+    transition: opacity var(--transition-normal);
     pointer-events: all;
 }
 
-/* Ensure dialogs appear above other menus */
-#dialog-ui,
-#pin-ui,
-#category-select-ui,
-#weapon-select-ui,
-#error-ui,
-#confirm-ui {
-    z-index: 1000000 !important;
+/* Dialogs appear above other menus */
+.paintball-ui[data-dialog-id] {
+    z-index: var(--z-dialog) !important;
 }
 
 .paintball-ui::before {
@@ -72,27 +150,22 @@ div, span, p, h1, h2, h3, h4, h5, h6, label, li, td, th {
 
 .paintball-container {
     position: relative;
-    filter: drop-shadow(0 4px 16px rgba(0, 0, 0, 0.5));
+    filter: drop-shadow(var(--shadow-md));
 }
 
 .paintball-box {
     position: relative;
-    background: linear-gradient(135deg, rgba(15, 15, 15, 0.98) 0%, rgba(20, 20, 20, 0.98) 100%);
-    border: 1px solid rgba(9, 135, 255, 0.3);
-    border-radius: 12px;
+    background: linear-gradient(135deg, var(--color-bg-primary) 0%, var(--color-bg-secondary) 100%);
+    border: 1px solid var(--color-border-primary);
+    border-radius: var(--radius-xl);
     overflow: hidden;
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
-    box-shadow: 
-        0 8px 32px rgba(0, 0, 0, 0.4),
-        0 2px 8px rgba(0, 0, 0, 0.3),
-        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    box-shadow: var(--shadow-lg), var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.05);
     min-width: 400px;
     max-width: 500px;
     max-height: 80vh;
-    transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1),
-                box-shadow 0.15s ease,
-                border-color 0.15s ease;
+    transition: transform var(--transition-smooth), box-shadow var(--transition-normal), border-color var(--transition-normal);
 }
 
 .paintball-accent-top {
@@ -101,11 +174,8 @@ div, span, p, h1, h2, h3, h4, h5, h6, label, li, td, th {
     left: 0;
     right: 0;
     height: 3px;
-    background: linear-gradient(90deg, 
-        rgba(9, 135, 255, 0.9) 0%, 
-        rgba(9, 135, 255, 0.9) 50%,
-        rgba(9, 135, 255, 0.9) 100%);
-    box-shadow: 0 0 12px rgba(0, 255, 255, 0.5);
+    background: linear-gradient(90deg, var(--color-primary) 0%, var(--color-primary) 50%, var(--color-primary) 100%);
+    box-shadow: var(--shadow-accent);
 }
 
 .paintball-accent-bottom {
@@ -114,7 +184,7 @@ div, span, p, h1, h2, h3, h4, h5, h6, label, li, td, th {
     left: 0;
     right: 0;
     height: 1px;
-    background: rgba(0, 255, 255, 0.3);
+    background: var(--color-accent-light);
 }
 
 .paintball-content {
@@ -128,22 +198,22 @@ div, span, p, h1, h2, h3, h4, h5, h6, label, li, td, th {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 20px 24px;
-    border-bottom: 1px solid rgba(9, 135, 255, 0.2);
+    padding: var(--spacing-xl) var(--spacing-xxl);
+    border-bottom: 1px solid var(--color-primary-dark);
     background: linear-gradient(90deg, rgba(9, 135, 255, 0.1) 0%, transparent 100%);
 }
 
 .paintball-title {
-    font-size: 20px;
+    font-size: var(--font-size-xl);
     font-weight: 600;
-    color: #FFFFFF;
+    color: var(--color-text-primary);
     letter-spacing: 0.3px;
 }
 
 .paintball-close {
     background: transparent;
     border: none;
-    color: #FFFFFF;
+    color: var(--color-text-primary);
     font-size: 28px;
     line-height: 1;
     cursor: pointer;
@@ -153,38 +223,38 @@ div, span, p, h1, h2, h3, h4, h5, h6, label, li, td, th {
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 6px;
-    transition: background 0.2s ease, color 0.2s ease;
+    border-radius: var(--radius-md);
+    transition: background var(--transition-normal), color var(--transition-normal);
 }
 
 .paintball-close:hover {
     background: rgba(255, 255, 255, 0.1);
-    color: #ff4444;
+    color: var(--color-error);
 }
 
 .paintball-menu {
-    padding: 16px;
+    padding: var(--spacing-lg);
     overflow-y: auto;
     max-height: calc(80vh - 80px);
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--spacing-sm);
 }
 
 .menu-item {
-    background: rgba(30, 30, 30, 0.6);
-    border: 1px solid rgba(9, 135, 255, 0.2);
-    border-radius: 8px;
-    padding: 16px;
+    background: var(--color-bg-tertiary);
+    border: 1px solid var(--color-primary-dark);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-lg);
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all var(--transition-normal);
 }
 
 .menu-item:hover {
-    background: rgba(30, 30, 30, 0.8);
-    border-color: rgba(9, 135, 255, 0.5);
+    background: var(--color-bg-tertiary-hover);
+    border-color: var(--color-primary-light);
     transform: translateX(4px);
-    box-shadow: 0 4px 12px rgba(9, 135, 255, 0.2);
+    box-shadow: var(--shadow-primary);
 }
 
 .menu-item:active {
@@ -192,34 +262,34 @@ div, span, p, h1, h2, h3, h4, h5, h6, label, li, td, th {
 }
 
 .menu-item-title {
-    font-size: 16px;
+    font-size: var(--font-size-lg);
     font-weight: 600;
-    color: #FFFFFF;
+    color: var(--color-text-primary);
     margin-bottom: 6px;
 }
 
 .menu-item-description {
-    font-size: 13px;
-    color: #AAAAAA;
+    font-size: var(--font-size-sm);
+    color: var(--color-text-secondary);
     line-height: 1.4;
 }
 
 .paintball-dialog {
-    padding: 24px;
+    padding: var(--spacing-xxl);
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: var(--spacing-lg);
 }
 
 .dialog-input {
-    background: rgba(30, 30, 30, 0.8);
-    border: 1px solid rgba(9, 135, 255, 0.3);
-    border-radius: 8px;
-    padding: 12px 16px;
-    color: #FFFFFF;
-    font-size: 14px;
-    font-family: 'Inter', sans-serif;
-    transition: border-color 0.2s ease, background 0.2s ease;
+    background: var(--color-bg-tertiary-hover);
+    border: 1px solid var(--color-border-primary);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-md) var(--spacing-lg);
+    color: var(--color-text-primary);
+    font-size: var(--font-size-base);
+    font-family: var(--font-family);
+    transition: border-color var(--transition-normal), background var(--transition-normal);
 }
 
 .dialog-input:focus {
@@ -229,34 +299,34 @@ div, span, p, h1, h2, h3, h4, h5, h6, label, li, td, th {
 }
 
 .dialog-input::placeholder {
-    color: #666666;
+    color: var(--color-text-placeholder);
 }
 
 .dialog-buttons {
     display: flex;
-    gap: 12px;
+    gap: var(--spacing-md);
     justify-content: flex-end;
 }
 
 .btn-primary {
     background: linear-gradient(135deg, rgba(9, 135, 255, 0.9) 0%, rgba(9, 135, 255, 0.7) 100%);
-    border: 1px solid rgba(9, 135, 255, 0.5);
-    border-radius: 8px;
-    padding: 12px 24px;
-    color: #FFFFFF;
-    font-size: 14px;
+    border: 1px solid var(--color-primary-light);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-md) var(--spacing-xxl);
+    color: var(--color-text-primary);
+    font-size: var(--font-size-base);
     font-weight: 500;
-    font-family: 'Inter', sans-serif;
+    font-family: var(--font-family);
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all var(--transition-normal);
     white-space: nowrap;
 }
 
 .btn-primary:hover {
-    background: linear-gradient(135deg, rgba(9, 135, 255, 1) 0%, rgba(9, 135, 255, 0.9) 100%);
+    background: linear-gradient(135deg, var(--color-primary-hover) 0%, rgba(9, 135, 255, 0.9) 100%);
     border-color: rgba(9, 135, 255, 0.8);
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(9, 135, 255, 0.3);
+    box-shadow: var(--shadow-primary-hover);
 }
 
 .btn-primary:active {
@@ -264,21 +334,21 @@ div, span, p, h1, h2, h3, h4, h5, h6, label, li, td, th {
 }
 
 .btn-secondary {
-    background: rgba(30, 30, 30, 0.8);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 8px;
-    padding: 12px 24px;
-    color: #FFFFFF;
-    font-size: 14px;
+    background: var(--color-bg-tertiary-hover);
+    border: 1px solid var(--color-border-secondary);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-md) var(--spacing-xxl);
+    color: var(--color-text-primary);
+    font-size: var(--font-size-base);
     font-weight: 500;
-    font-family: 'Inter', sans-serif;
+    font-family: var(--font-family);
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all var(--transition-normal);
     white-space: nowrap;
 }
 
 .btn-secondary:hover {
-    background: rgba(30, 30, 30, 1);
+    background: var(--color-bg-tertiary);
     border-color: rgba(255, 255, 255, 0.4);
     transform: translateY(-1px);
 }
@@ -287,7 +357,9 @@ div, span, p, h1, h2, h3, h4, h5, h6, label, li, td, th {
     transform: translateY(0);
 }
 
-/* Scrollbar styling */
+/* ============================================================================
+   SCROLLBAR STYLING
+   ============================================================================ */
 .paintball-menu::-webkit-scrollbar {
     width: 6px;
 }
@@ -298,7 +370,7 @@ div, span, p, h1, h2, h3, h4, h5, h6, label, li, td, th {
 }
 
 .paintball-menu::-webkit-scrollbar-thumb {
-    background: rgba(9, 135, 255, 0.5);
+    background: var(--color-primary-light);
     border-radius: 3px;
 }
 
@@ -306,15 +378,15 @@ div, span, p, h1, h2, h3, h4, h5, h6, label, li, td, th {
     background: rgba(9, 135, 255, 0.7);
 }
 
-/* Press E UI Styles */
+/* ============================================================================
+   PRESS E UI
+   ============================================================================ */
 .press-e-ui {
     position: absolute;
     pointer-events: none;
     user-select: none;
-    z-index: 1000;
-    transition: opacity 0.1s cubic-bezier(0.25, 0.46, 0.45, 0.94),
-                transform 0.1s cubic-bezier(0.25, 0.46, 0.45, 0.94),
-                visibility 0.1s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    z-index: var(--z-press-e);
+    transition: opacity var(--transition-fast), transform var(--transition-fast), visibility var(--transition-fast);
     transform: translate(-50%, -50%);
     opacity: 1;
 }
@@ -327,25 +399,20 @@ div, span, p, h1, h2, h3, h4, h5, h6, label, li, td, th {
 
 .press-e-container {
     position: relative;
-    filter: drop-shadow(0 4px 16px rgba(0, 0, 0, 0.5));
+    filter: drop-shadow(var(--shadow-md));
 }
 
 .press-e-box {
     position: relative;
-    background: linear-gradient(135deg, rgba(15, 15, 15, 0.95) 0%, rgba(20, 20, 20, 0.95) 100%);
-    border: 1px solid rgba(0, 255, 255, 0.2);
-    border-radius: 6px;
+    background: linear-gradient(135deg, var(--color-bg-primary) 0%, var(--color-bg-secondary) 100%);
+    border: 1px solid var(--color-border-accent);
+    border-radius: var(--radius-md);
     overflow: hidden;
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
-    box-shadow: 
-        0 8px 32px rgba(0, 0, 0, 0.4),
-        0 2px 8px rgba(0, 0, 0, 0.3),
-        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    box-shadow: var(--shadow-lg), var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.05);
     min-width: 220px;
-    transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1),
-                box-shadow 0.15s ease,
-                border-color 0.15s ease;
+    transition: transform var(--transition-smooth), box-shadow var(--transition-normal), border-color var(--transition-normal);
 }
 
 .press-e-accent-top {
@@ -354,11 +421,8 @@ div, span, p, h1, h2, h3, h4, h5, h6, label, li, td, th {
     left: 0;
     right: 0;
     height: 3px;
-    background: linear-gradient(90deg, 
-        rgba(9, 135, 255, 0.9) 0%, 
-        rgba(9, 135, 255, 0.9) 50%,
-        rgba(9, 135, 255, 0.9) 100%);
-    box-shadow: 0 0 12px rgba(0, 255, 255, 0.5);
+    background: linear-gradient(90deg, var(--color-primary) 0%, var(--color-primary) 50%, var(--color-primary) 100%);
+    box-shadow: var(--shadow-accent);
 }
 
 .press-e-accent-bottom {
@@ -367,11 +431,11 @@ div, span, p, h1, h2, h3, h4, h5, h6, label, li, td, th {
     left: 0;
     right: 0;
     height: 1px;
-    background: rgba(0, 255, 255, 0.3);
+    background: var(--color-accent-light);
 }
 
 .press-e-content {
-    padding: 14px 24px;
+    padding: 14px var(--spacing-xxl);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -379,8 +443,8 @@ div, span, p, h1, h2, h3, h4, h5, h6, label, li, td, th {
 }
 
 .press-e-text {
-    color: #FFFFFF;
-    font-size: 15px;
+    color: var(--color-text-primary);
+    font-size: var(--font-size-md);
     font-weight: 500;
     text-align: center;
     letter-spacing: 0.2px;
@@ -394,14 +458,17 @@ div, span, p, h1, h2, h3, h4, h5, h6, label, li, td, th {
     text-shadow: inherit;
 }
 
+/* ============================================================================
+   ERROR MESSAGE
+   ============================================================================ */
 .error-message {
-    color: #ff4444;
-    font-size: 13px;
-    padding: 8px 12px;
-    margin-bottom: 12px;
-    background: rgba(255, 68, 68, 0.1);
-    border-left: 3px solid #ff4444;
-    border-radius: 4px;
+    color: var(--color-error);
+    font-size: var(--font-size-sm);
+    padding: var(--spacing-sm) var(--spacing-md);
+    margin-bottom: var(--spacing-md);
+    background: var(--color-error-light);
+    border-left: 3px solid var(--color-error);
+    border-radius: var(--radius-sm);
     line-height: 1.4;
     display: none;
 }
@@ -410,3 +477,47 @@ div, span, p, h1, h2, h3, h4, h5, h6, label, li, td, th {
     display: block;
 }
 
+/* ============================================================================
+   UTILITY CLASSES
+   ============================================================================ */
+.text-center {
+    text-align: center;
+}
+
+.text-muted {
+    color: var(--color-text-secondary);
+}
+
+.cursor-default {
+    cursor: default;
+}
+
+.cursor-not-allowed {
+    cursor: not-allowed;
+}
+
+.opacity-disabled {
+    opacity: 0.6;
+}
+
+.opacity-half {
+    opacity: 0.5;
+}
+
+.flex {
+    display: flex;
+}
+
+.flex-between {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.flex-gap {
+    gap: var(--spacing-sm);
+}
+
+.w-full {
+    width: 100%;
+}
