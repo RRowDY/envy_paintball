@@ -1005,6 +1005,9 @@ RegisterNetEvent('envy_paintball:matchEnded', function()
     -- Clear any ongoing animations
     ClearPedTasksImmediately(ped)
     
+    -- Explicitly unfreeze player (important when revived after match ends)
+    FreezeEntityPosition(ped, false)
+    
     -- Disable spawn protection and restore opacity
     if spawnProtected then
         spawnProtected = false
@@ -1020,6 +1023,17 @@ RegisterNetEvent('envy_paintball:matchEnded', function()
     
     -- Destroy boundary zone
     destroyBoundaryZone()
+    
+    -- Create a thread to continuously unfreeze for a period to catch any ESX death loops
+    CreateThread(function()
+        local startTime = GetGameTimer()
+        local duration = 3000 -- 3 seconds of aggressive unfreezing
+        while GetGameTimer() - startTime < duration do
+            local currentPed = PlayerPedId()
+            FreezeEntityPosition(currentPed, false)
+            Wait(100) -- Check every 100ms
+        end
+    end)
     
     -- Removed duplicate notification - server already sends notification with reason via EndMatch
 end)
@@ -1117,12 +1131,18 @@ RegisterNetEvent('envy_paintball:teleportToPed', function(coords)
     -- Clear any ongoing animations
     ClearPedTasksImmediately(ped)
     
+    -- Explicitly unfreeze before teleport
+    FreezeEntityPosition(ped, false)
+    
     -- Wait a moment to ensure revive has completed
     Wait(500)
     
     -- Use SetEntityCoords with all flags to ensure proper teleportation
     SetEntityCoords(ped, coords.x, coords.y, coords.z, false, false, false, true)
     SetEntityHeading(ped, coords.w or 0.0)
+    
+    -- Unfreeze after teleport
+    FreezeEntityPosition(ped, false)
     
     -- Ensure player stays at this location (prevent ESX from restoring position)
     -- Only teleport once more if needed, not repeatedly
@@ -1140,9 +1160,15 @@ RegisterNetEvent('envy_paintball:teleportToPed', function(coords)
             teleportedOnce = true
         end
         
+        -- Unfreeze again after position check
+        FreezeEntityPosition(ped, false)
+        
         -- Reset flag after monitoring is done
         Wait(2000)
         isTeleportingToPed = false
+        
+        -- Final unfreeze to ensure player can move
+        FreezeEntityPosition(ped, false)
     end)
 end)
 
@@ -1307,6 +1333,9 @@ function PaintballRevive(ped, coords, heading, keepInvincible)
     -- Set death status to false
     TriggerServerEvent('esx_ambulancejob:setDeathStatus', false)
     
+    -- Clear any death animations that might be playing (ESX death anim)
+    ClearPedTasksImmediately(ped)
+    
     -- Resurrect player at spawn location (keepInvincible = true means don't set invincible to false)
     RespawnPed(ped, coords, heading, keepInvincible)
     
@@ -1315,6 +1344,9 @@ function PaintballRevive(ped, coords, heading, keepInvincible)
     ClearExtraTimecycleModifier()
     -- Reset death state
     isDead = false
+    
+    -- Explicitly unfreeze after revive
+    FreezeEntityPosition(ped, false)
 end
 
 -- Custom revive event for paintball (works in or out of match)
@@ -1327,6 +1359,20 @@ AddEventHandler('envy_paintball:revive', function(coords, heading)
         reviveCoords = GetEntityCoords(ped)
     end
     PaintballRevive(ped, reviveCoords, heading or GetEntityHeading(ped))
+    
+    -- Explicitly unfreeze player multiple times with delays to override ESX death loops
+    FreezeEntityPosition(ped, false)
+    
+    -- Create a thread to continuously unfreeze for a period to catch any ESX death loops
+    CreateThread(function()
+        local startTime = GetGameTimer()
+        local duration = 3000 -- 3 seconds of aggressive unfreezing
+        while GetGameTimer() - startTime < duration do
+            local currentPed = PlayerPedId()
+            FreezeEntityPosition(currentPed, false)
+            Wait(100) -- Check every 100ms
+        end
+    end)
 end)
 
 -- Handle respawn

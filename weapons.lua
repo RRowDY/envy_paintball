@@ -6,6 +6,7 @@ return {
     weapons = {
         { hash = 49308671, name = "GREENT", category = "rifles", enabled = true },
         { hash = -901401918, name = "SPYDER", category = "rifles", enabled = true },
-        { hash = 584646201, name = "AP Pistol", category = "pistols", enabled = true }
+        { hash = 584646201, name = "AP Pistol", category = "pistols", enabled = true },
+        { hash = 1243691377, name = "OBSIDIAN EVO", category = "smgs", enabled = true }
     }
 }
