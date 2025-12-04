@@ -28,6 +28,7 @@ local editorZone = nil
 local previewZone = nil
 local zoneDrawThreads = {} -- Track threads that draw zones
 local spawnProtected = false
+local selectedSpawnIndex = nil -- Track which spawn is selected for highlighting
 local spawnProtectionTime = 0
 local isDead = false
 
@@ -816,11 +817,49 @@ local function createBoundaryZone(matchData)
         local spawns = matchData.map and matchData.map.spawns
         local ped = PlayerPedId()
         local pedCoords = GetEntityCoords(ped)
+        local playerServerId = GetPlayerServerId(PlayerId())
+        
+        -- Get player's team
+        local playerTeam = nil
+        if matchData.gameMode and matchData.gameMode.teams > 0 and matchData.teams then
+            for teamNum, teamPlayers in ipairs(matchData.teams) do
+                for _, pId in ipairs(teamPlayers) do
+                    if pId == playerServerId then
+                        playerTeam = teamNum
+                        break
+                    end
+                end
+                if playerTeam then break end
+            end
+        end
         
         if spawns and #spawns > 0 then
-            -- Select a random spawn point
-            local spawnIndex = math.random(1, #spawns)
-            local spawn = spawns[spawnIndex]
+            -- Select appropriate spawn point based on team/FFA mode
+            local validSpawns = {}
+            
+            if not playerTeam then
+                -- FFA mode: only use spawns with no team assignment
+                for _, spawn in ipairs(spawns) do
+                    if not spawn.team then
+                        table.insert(validSpawns, spawn)
+                    end
+                end
+            else
+                -- Team mode: only use spawns assigned to player's team
+                for _, spawn in ipairs(spawns) do
+                    if spawn.team == playerTeam then
+                        table.insert(validSpawns, spawn)
+                    end
+                end
+            end
+            
+            -- Use valid spawns if available, otherwise fallback to all spawns (shouldn't happen but safety check)
+            if #validSpawns == 0 then
+                validSpawns = spawns
+            end
+            
+            local spawnIndex = math.random(1, #validSpawns)
+            local spawn = validSpawns[spawnIndex]
             
             if spawn and spawn.x and spawn.y and spawn.z then
                 -- Teleport player to spawn point
@@ -1552,9 +1591,9 @@ CreateThread(function()
                     local distance = #(pedCoords - spawnPos)
                     
                     if distance < 100.0 then
-                        local teamColor = spawn.team and (spawn.team == 1 and {255, 0, 0} or {0, 0, 255}) or {0, 255, 0}
+                        local teamColor = spawn.team and (spawn.team == 1 and {255, 0, 0} or {0, 255, 0}) or {0, 0, 255}
                         
-                        DrawMarker(1, spawn.x, spawn.y, spawn.z - 0.5, 0.0, 0.0, 0.0, 0, 0.0, 0.0, 1.0, 1.0, 1.0, teamColor[1], teamColor[2], teamColor[3], 150, false, false, 2, false, false, false, false)
+                        DrawMarker(1, spawn.x, spawn.y, spawn.z - 0.5, 0.0, 0.0, 0.0, 0, 0.0, 0.0, 1.0, 1.0, 1.0, teamColor[1], teamColor[2], teamColor[3], 200, false, false, 2, false, false, false, false)
                         DrawMarker(28, spawn.x, spawn.y, spawn.z, 0.0, 0.0, 0.0, 0, 0.0, 0.0, 0.8, 0.8, 0.3, teamColor[1], teamColor[2], teamColor[3], 150, false, false, 2, false, false, false, false)
                         
                         local label = spawn.team and string.format("~b~Spawn %d (Team %d)~s~", i, spawn.team) or string.format("~b~Spawn %d~s~", i)
@@ -2085,28 +2124,27 @@ function StartMapEditor()
             for _, flash in ipairs(recentlyPlaced) do
                 local elapsed = currentTime - flash.time
                 local progress = elapsed / flash.duration
-                local alpha = math.floor(255 * (1.0 - progress))
-                local scale = 1.0 + (progress * 0.8)
+                -- Really subtle alpha - much lower maximum and faster fade
+                local alpha = math.floor(40 * (1.0 - progress)) -- Reduced from 255 to 40 for very subtle effect
+                local scale = 1.0 + (progress * 0.15) -- Reduced from 0.3 to 0.15 for minimal growth
                 
                 if flash.type == "center" then
-                    DrawMarker(1, flash.position.x, flash.position.y, flash.position.z - 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0 * scale, 2.0 * scale, 2.0 * scale, 0, 255, 0, alpha, false, true, 2, false, false, false, false)
+                    DrawMarker(1, flash.position.x, flash.position.y, flash.position.z - 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0 * scale, 2.0 * scale, 2.0 * scale, 0, 255, 0, math.min(alpha + 20, 255), false, true, 2, false, false, false, false)
                     DrawMarker(28, flash.position.x, flash.position.y, flash.position.z, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.5 * scale, 1.5 * scale, 0.8, 0, 255, 0, alpha, false, true, 2, false, false, false, false)
-                    DrawMarker(1, flash.position.x, flash.position.y, flash.position.z - 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.3 * scale, 0.3 * scale, 0.1, 0, 255, 0, math.floor(alpha * 0.7), false, true, 2, false, false, false, false)
+                    DrawMarker(1, flash.position.x, flash.position.y, flash.position.z - 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.3 * scale, 0.3 * scale, 0.1, 0, 255, 0, math.floor((alpha + 20) * 0.7), false, true, 2, false, false, false, false)
                     DrawText3D(flash.position.x, flash.position.y, flash.position.z + 2.0 + (scale * 0.5), "~g~✓ CENTER PLACED~s~")
                 elseif flash.type == "spawn" then
-                    local teamColor = flash.team and (flash.team == 1 and {255, 0, 0} or {0, 0, 255}) or {0, 0, 255}
-                    DrawMarker(1, flash.position.x, flash.position.y, flash.position.z - 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.8 * scale, 1.8 * scale, 1.8 * scale, teamColor[1], teamColor[2], teamColor[3], alpha, false, true, 2, false, false, false, false)
-                    DrawMarker(28, flash.position.x, flash.position.y, flash.position.z, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.2 * scale, 1.2 * scale, 0.8, teamColor[1], teamColor[2], teamColor[3], alpha, false, true, 2, false, false, false, false)
-                    DrawMarker(1, flash.position.x, flash.position.y, flash.position.z - 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.3 * scale, 0.3 * scale, 0.1, teamColor[1], teamColor[2], teamColor[3], math.floor(alpha * 0.7), false, true, 2, false, false, false, false)
+                    local teamColor = flash.team and (flash.team == 1 and {255, 0, 0} or {0, 255, 0}) or {0, 0, 255}
+                    -- Marker type 1 for placement animation - more opaque
+                    DrawMarker(1, flash.position.x, flash.position.y, flash.position.z - 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.7 * scale, 0.7 * scale, 0.7 * scale, teamColor[1], teamColor[2], teamColor[3], math.min(alpha + 20, 255), false, true, 2, false, false, false, false)
                     local teamText = flash.team and string.format(" (Team %d)", flash.team) or ""
-                    DrawText3D(flash.position.x, flash.position.y, flash.position.z + 2.0 + (scale * 0.5), string.format("~b~✓ SPAWN PLACED%s~s~", teamText))
+                    DrawText3D(flash.position.x, flash.position.y, flash.position.z + 2.0 + (scale * 0.2), string.format("~b~✓ SPAWN PLACED%s~s~", teamText))
                 end
             end
             
             if currentMapData then
                 if currentMapData.center then
-                    -- Draw center point marker (zone visualization is handled by PolyZone)
-                    DrawMarker(1, currentMapData.center.x, currentMapData.center.y, currentMapData.center.z - 0.5, 0.0, 0.0, 0.0, 0, 0.0, 0.0, 1.0, 1.0, 1.0, 0, 255, 0, 50, false, false, 2, false, false, false, false)
+                    -- Draw center point marker (only type 28, zone visualization is handled by PolyZone)
                     DrawMarker(28, currentMapData.center.x, currentMapData.center.y, currentMapData.center.z, 0.0, 0.0, 0.0, 0, 0.0, 0.0, 0.8, 0.8, 0.3, 0, 255, 0, 50, false, false, 2, false, false, false, false)
                     DrawText3D(currentMapData.center.x, currentMapData.center.y, currentMapData.center.z + 1.5, "~g~CENTER POINT~s~")
                     -- Zone sphere is now handled by PolyZone CircleZone
@@ -2114,11 +2152,28 @@ function StartMapEditor()
 
                 if currentMapData.spawns then
                     for i, spawn in ipairs(currentMapData.spawns) do
-                        local teamColor = spawn.team and (spawn.team == 1 and {255, 0, 0} or {0, 0, 255}) or {0, 0, 255}
-                        DrawMarker(1, spawn.x, spawn.y, spawn.z - 0.5, 0.0, 0.0, 0.0, 0, 0.0, 0.0, 0.8, 0.8, 0.8, teamColor[1], teamColor[2], teamColor[3], 50, false, false, 2, false, false, false, false)
-                        DrawMarker(28, spawn.x, spawn.y, spawn.z, 0.0, 0.0, 0.0, 0, 0.0, 0.0, 0.6, 0.6, 0.2, teamColor[1], teamColor[2], teamColor[3], 50, false, false, 2, false, false, false, false)
+                        -- Team 1 = Red, Team 2 = Green, FFA = Blue
+                        local teamColor = spawn.team and (spawn.team == 1 and {255, 0, 0} or {0, 255, 0}) or {0, 0, 255}
+                        local isSelected = (selectedSpawnIndex == i)
+                        
+                        -- More opaque markers - increased alpha
+                        local alpha = isSelected and 150 or 100
+                        local size = isSelected and 1.1 or 1.0
+                        
+                        -- Marker type 1 (cylinder) - more opaque
+                        DrawMarker(1, spawn.x, spawn.y, spawn.z - 0.5, 0.0, 0.0, 0.0, 0, 0.0, 0.0, 0.6 * size, 0.6 * size, 0.6 * size, teamColor[1], teamColor[2], teamColor[3], alpha, false, true, 2, false, false, false, false)
+                        
+                        -- Draw a subtle pulsing ring around selected spawn - more opaque
+                        if isSelected then
+                            local pulse = math.sin(GetGameTimer() / 200.0) * 0.2 + 1.0
+                            DrawMarker(1, spawn.x, spawn.y, spawn.z - 0.5, 0.0, 0.0, 0.0, 0, 0.0, 0.0, 1.2 * pulse, 1.2 * pulse, 0.1, 255, 255, 0, 80, false, true, 2, false, false, false, false)
+                        end
+                        
                         local label = spawn.team and string.format("~b~Spawn %d (Team %d)~s~", i, spawn.team) or string.format("~b~Spawn %d~s~", i)
-                        DrawText3D(spawn.x, spawn.y, spawn.z + 1.5, label)
+                        if isSelected then
+                            label = string.format("~y~>>> %s <<<~s~", label)
+                        end
+                        DrawText3D(spawn.x, spawn.y, spawn.z + 2.0, label)
                     end
                 end
             end
@@ -2226,6 +2281,7 @@ function StopMapEditor()
     placingPoint = false
     placingType = nil
     selectedTeam = nil
+    selectedSpawnIndex = nil
     StopFreecam()
     currentMapData = nil
     
@@ -2263,7 +2319,8 @@ function OpenMapEditorMenu()
         menuData = {
             radius = currentMapData.radius,
             mapName = currentMapData.name or "",
-            isEditing = currentMapData.id ~= nil
+            isEditing = currentMapData.id ~= nil,
+            spawnCount = currentMapData.spawns and #currentMapData.spawns or 0
         }
     })
 end
@@ -2310,6 +2367,127 @@ function StartPlacingSpawn(team)
     SendNUIMessage({ action = 'hideMenu', menu = 'team' })
     SetNuiFocus(false, false)
     ESX.ShowNotification("Aim where you want the spawn point and press ~g~E~s~ to place. Press ~r~ESC~s~ when done.", "info", 4000)
+end
+
+-- Calculate spawn statistics
+function GetSpawnStatistics()
+    if not currentMapData or not currentMapData.spawns then
+        return {
+            total = 0,
+            team1 = 0,
+            team2 = 0,
+            ffa = 0
+        }
+    end
+    
+    local stats = {
+        total = #currentMapData.spawns,
+        team1 = 0,
+        team2 = 0,
+        ffa = 0
+    }
+    
+    for _, spawn in ipairs(currentMapData.spawns) do
+        if spawn.team == 1 then
+            stats.team1 = stats.team1 + 1
+        elseif spawn.team == 2 then
+            stats.team2 = stats.team2 + 1
+        else
+            stats.ffa = stats.ffa + 1
+        end
+    end
+    
+    return stats
+end
+
+-- Open spawn viewer menu
+function OpenSpawnViewerMenu()
+    if not currentMapData or not currentMapData.spawns or #currentMapData.spawns == 0 then
+        ESX.ShowNotification("~r~No spawns to view! Add spawn points first.~s~", "error", 3000)
+        return
+    end
+    
+    local stats = GetSpawnStatistics()
+    local spawnsList = {}
+    
+    for i, spawn in ipairs(currentMapData.spawns) do
+        local spawnType = "FFA"
+        if spawn.team == 1 then
+            spawnType = "Team 1"
+        elseif spawn.team == 2 then
+            spawnType = "Team 2"
+        end
+        
+        table.insert(spawnsList, {
+            index = i,
+            x = spawn.x,
+            y = spawn.y,
+            z = spawn.z,
+            w = spawn.w or 0.0,
+            team = spawn.team,
+            type = spawnType
+        })
+    end
+    
+    SetNuiFocus(false, false)
+    Wait(50)
+    SetNuiFocus(true, true)
+    SendNUIMessage({
+        action = 'showSpawnViewer',
+        stats = stats,
+        spawns = spawnsList
+    })
+end
+
+-- Teleport to spawn
+function TeleportToSpawn(spawnIndex)
+    if not currentMapData or not currentMapData.spawns or not currentMapData.spawns[spawnIndex] then
+        ESX.ShowNotification("~r~Invalid spawn index!~s~", "error", 3000)
+        return
+    end
+    
+    local spawn = currentMapData.spawns[spawnIndex]
+    local spawnPos = vector3(spawn.x, spawn.y, spawn.z)
+    
+    if freecamActive and freecam and DoesCamExist(freecam) then
+        -- If in freecam, move the camera to the spawn
+        local targetZ = spawnPos.z + 2.0
+        local targetPos = vector3(spawnPos.x, spawnPos.y, targetZ)
+        
+        -- Set camera rotation to look down at the spawn point
+        local heading = spawn.w or freecamRotation.z
+        freecamRotation = {x = -45.0, y = 0.0, z = heading}
+        
+        -- Update the freecam position variable BEFORE setting camera (so thread uses new position)
+        freecamPosition = targetPos
+        
+        -- Set camera position and rotation immediately
+        SetCamCoord(freecam, targetPos.x, targetPos.y, targetPos.z)
+        SetCamRot(freecam, freecamRotation.x, freecamRotation.y, freecamRotation.z, 2)
+        
+        -- Force update camera multiple times to ensure it sticks (race condition fix)
+        CreateThread(function()
+            for i = 1, 3 do
+                Wait(0)
+                SetCamCoord(freecam, targetPos.x, targetPos.y, targetPos.z)
+                SetCamRot(freecam, freecamRotation.x, freecamRotation.y, freecamRotation.z, 2)
+                freecamPosition = targetPos
+            end
+        end)
+        
+        ESX.ShowNotification(string.format("~g~Camera moved to Spawn %d~s~", spawnIndex), "success", 3000)
+    else
+        -- If not in freecam, teleport player
+        local ped = PlayerPedId()
+        SetEntityCoordsNoOffset(ped, spawnPos.x, spawnPos.y, spawnPos.z, false, false, false)
+        if spawn.w then
+            SetEntityHeading(ped, spawn.w)
+        end
+        ESX.ShowNotification(string.format("~g~Teleported to Spawn %d~s~", spawnIndex), "success", 3000)
+    end
+    
+    -- Highlight the selected spawn
+    selectedSpawnIndex = spawnIndex
 end
 
 function ClearMapData()
@@ -2427,6 +2605,11 @@ RegisterNUICallback('editorAction', function(data, cb)
         SetNuiFocus(false, false)
         Wait(100)
         OpenSpawnTeamMenu()
+    elseif action == "viewSpawns" then
+        SendNUIMessage({ action = 'hideMenu', menu = 'editor' })
+        SetNuiFocus(false, false)
+        Wait(100)
+        OpenSpawnViewerMenu()
     elseif action == "clearMap" then
         ClearMapData()
         SendNUIMessage({ action = 'hideMenu' })
@@ -2483,6 +2666,32 @@ RegisterNUICallback('dialogSubmit', function(data, cb)
     cb('ok')
 end)
 
+RegisterNUICallback('teleportToSpawn', function(data, cb)
+    local spawnIndex = data.spawnIndex
+    
+    -- Force close UI immediately - no delays, no threads
+    SendNUIMessage({ action = 'hideMenu', menu = 'spawnViewer' })
+    SendNUIMessage({ action = 'hideMenu' }) -- Hide all menus to be absolutely sure
+    SetNuiFocus(false, false)
+    
+    cb('ok')
+    
+    -- Teleport after UI is closed
+    if spawnIndex then
+        Wait(50) -- Small delay to ensure UI is closed
+        TeleportToSpawn(spawnIndex)
+    end
+end)
+
+RegisterNUICallback('closeSpawnViewer', function(data, cb)
+    selectedSpawnIndex = nil
+    SendNUIMessage({ action = 'hideMenu', menu = 'spawnViewer' })
+    SetNuiFocus(false, false)
+    Wait(100)
+    OpenMapEditorMenu()
+    cb('ok')
+end)
+
 -- ============================================================================
 -- DRAWING FUNCTIONS
 -- ============================================================================
@@ -2521,12 +2730,13 @@ function DrawText3D(x, y, z, text)
     scale = math.max(0.1, math.min(scale, 2.0))
 
     if onScreen then
-        SetTextScale(0.0 * scale, 0.35 * scale)
+        -- Make text bigger and easier to read (doubled scale)
+        SetTextScale(0.0 * scale, 1.1 * scale) -- Doubled from 0.55 to 1.1
         SetTextFont(4)
         SetTextProportional(1)
-        SetTextColour(255, 255, 255, 215)
+        SetTextColour(255, 255, 255, 255) -- Full opacity for better visibility
         SetTextDropshadow(0, 0, 0, 0, 255)
-        SetTextEdge(2, 0, 0, 0, 150)
+        SetTextEdge(3, 0, 0, 0, 200) -- Thicker edge for better readability
         SetTextDropShadow()
         SetTextOutline()
         SetTextEntry("STRING")

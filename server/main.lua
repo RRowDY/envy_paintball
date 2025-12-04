@@ -49,7 +49,7 @@ local function GetSpawnPointForPlayer(match, playerId)
     
     local playerTeam = GetPlayerTeam(match, playerId)
     
-    -- FFA: any spawn point
+    -- FFA mode: only use spawns with no team assignment
     if not playerTeam then
         local ffaSpawns = {}
         for _, spawn in ipairs(spawns) do
@@ -57,24 +57,26 @@ local function GetSpawnPointForPlayer(match, playerId)
                 table.insert(ffaSpawns, spawn)
             end
         end
-        -- If no FFA-specific spawns, use all spawns
-        if #ffaSpawns == 0 then
-            ffaSpawns = spawns
+        -- Only return FFA spawns - no fallback to all spawns
+        if #ffaSpawns > 0 then
+            return ffaSpawns[math.random(1, #ffaSpawns)]
+        else
+            return nil -- No FFA spawns available
         end
-        return ffaSpawns[math.random(1, #ffaSpawns)]
     else
-        -- TDM/Team modes: spawn at team-specific spawn point
+        -- Team modes: only use spawns assigned to player's team
         local teamSpawns = {}
         for _, spawn in ipairs(spawns) do
             if spawn.team == playerTeam then
                 table.insert(teamSpawns, spawn)
             end
         end
-        -- If no team-specific spawns, use all spawns
-        if #teamSpawns == 0 then
-            teamSpawns = spawns
+        -- Only return team-specific spawns - no fallback to all spawns
+        if #teamSpawns > 0 then
+            return teamSpawns[math.random(1, #teamSpawns)]
+        else
+            return nil -- No team-specific spawns available
         end
-        return teamSpawns[math.random(1, #teamSpawns)]
     end
 end
 
@@ -474,9 +476,17 @@ function StartMatch(matchId)
 
     -- Teleport and notify players
     for _, playerId in ipairs(match.players) do
-        local spawnIndex = math.random(1, #match.map.spawns)
-        local spawn = match.map.spawns[spawnIndex]
-        TriggerClientEvent('envy_paintball:teleportToSpawn', playerId, spawn)
+        local spawn = GetSpawnPointForPlayer(match, playerId)
+        if not spawn then
+            -- Fallback to random spawn if no appropriate spawn found
+            if match.map.spawns and #match.map.spawns > 0 then
+                local spawnIndex = math.random(1, #match.map.spawns)
+                spawn = match.map.spawns[spawnIndex]
+            end
+        end
+        if spawn then
+            TriggerClientEvent('envy_paintball:teleportToSpawn', playerId, spawn)
+        end
         TriggerClientEvent('envy_paintball:matchActive', playerId, match)
     end
 
@@ -1801,16 +1811,28 @@ RegisterNetEvent('esx:onPlayerDeath', function(data)
     local victimId = source
     local killerServerId = data.killerServerId
     
-    if not data.killedByPlayer or not killerServerId then return end
-    
     local victimMatchId = playerMatches[victimId]
     if not victimMatchId then return end
     
-    local killerMatchId = playerMatches[killerServerId]
-    if not killerMatchId or killerMatchId ~= victimMatchId then return end
-    
     local match = activeMatches[victimMatchId]
     if not match or match.status ~= "active" then return end
+    
+    -- Handle non-player deaths (starvation, thirst, fall damage, etc.)
+    if not data.killedByPlayer or not killerServerId then
+        -- Respawn player but don't award points or track kills/deaths
+        match.deadPlayers[victimId] = true
+        CreateThread(function()
+            Wait(Config.RespawnDelay * 1000)
+            if match and match.status == "active" and match.deadPlayers[victimId] then
+                RespawnPlayer(match, victimId)
+            end
+        end)
+        return
+    end
+    
+    -- Player was killed by another player - continue with normal death handling
+    local killerMatchId = playerMatches[killerServerId]
+    if not killerMatchId or killerMatchId ~= victimMatchId then return end
     
     -- Check if killer is on opposing team (for TDM)
     local killerTeam = GetPlayerTeam(match, killerServerId)

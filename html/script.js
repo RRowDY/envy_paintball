@@ -30,6 +30,7 @@ const MENU_IDS = {
     ERROR: 'error',
     CONFIRM: 'confirm',
     ADMIN_DASHBOARD: 'admin-dashboard',
+    SPAWN_VIEWER: 'spawn-viewer',
 };
 
 // ============================================================================
@@ -150,6 +151,7 @@ const MenuManager = {
             { id: MENU_IDS.PLAYER_SEARCH, title: 'Search Players', isDialog: true },
             { id: MENU_IDS.ERROR, title: 'Error', isDialog: true },
             { id: MENU_IDS.CONFIRM, title: 'Confirm', isDialog: true },
+            { id: MENU_IDS.SPAWN_VIEWER, title: 'Spawn Viewer', isDialog: false },
         ];
         
         menuConfigs.forEach(config => {
@@ -1284,6 +1286,7 @@ const MenuHandlers = {
         const items = [
             { title: 'Set Center Point', description: 'Aim and place the center point of the map', action: 'setCenter' },
             { title: 'Add Spawn Point', description: 'Aim and place a spawn point', action: 'addSpawn' },
+            { title: 'View All Spawns', description: menuData.spawnCount ? `View and manage ${menuData.spawnCount} spawn point${menuData.spawnCount !== 1 ? 's' : ''}` : 'View all spawn points', action: 'viewSpawns' },
             { title: 'Clear Map', description: 'Clear all map data (center, spawns)', action: 'clearMap' },
             { title: 'Save Map', description: 'Save the current map', action: 'saveMap' },
             { title: 'Leave Editor', description: 'Exit the map editor', action: 'leaveEditor' },
@@ -1297,6 +1300,10 @@ const MenuHandlers = {
                     // Actions that navigate to other menus
                     if (itemData.action === 'addSpawn') {
                         // Navigating to team selection
+                        MenuManager.isNavigating = true;
+                        MenuManager.hide(MENU_IDS.EDITOR, { checkFocusRelease: false });
+                    } else if (itemData.action === 'viewSpawns') {
+                        // Navigating to spawn viewer
                         MenuManager.isNavigating = true;
                         MenuManager.hide(MENU_IDS.EDITOR, { checkFocusRelease: false });
                     } else if (itemData.action === 'clearMap') {
@@ -1356,6 +1363,86 @@ const MenuHandlers = {
         MenuManager.show(MENU_IDS.TEAM);
     },
 
+    /**
+     * Display spawn viewer menu
+     */
+    displaySpawnViewer(data) {
+        const content = MenuManager.getContent(MENU_IDS.SPAWN_VIEWER);
+        if (!content) return;
+        
+        content.innerHTML = '';
+        
+        // Display statistics
+        const stats = data.stats || { total: 0, team1: 0, team2: 0, ffa: 0 };
+        const statsDiv = document.createElement('div');
+        statsDiv.style.cssText = 'background: rgba(0, 100, 200, 0.2); padding: 12px; border-radius: 8px; margin-bottom: 16px; border: 1px solid rgba(0, 150, 255, 0.3);';
+        statsDiv.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <strong style="color: #fff; font-size: 16px;">Spawn Statistics</strong>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; font-size: 14px;">
+                <div style="color: #fff;">Total: <span style="color: #4CAF50; font-weight: bold;">${stats.total}</span></div>
+                <div style="color: #fff;">Team 1: <span style="color: #FF4444; font-weight: bold;">${stats.team1}</span></div>
+                <div style="color: #fff;">Team 2: <span style="color: #4CAF50; font-weight: bold;">${stats.team2}</span></div>
+                <div style="color: #fff;">FFA: <span style="color: #44AAFF; font-weight: bold;">${stats.ffa}</span></div>
+            </div>
+        `;
+        content.appendChild(statsDiv);
+        
+        // Display spawns list
+        const spawns = data.spawns || [];
+        if (spawns.length === 0) {
+            const emptyDiv = document.createElement('div');
+            emptyDiv.style.cssText = 'text-align: center; padding: 20px; color: #999;';
+            emptyDiv.textContent = 'No spawns available';
+            content.appendChild(emptyDiv);
+        } else {
+            spawns.forEach(spawn => {
+                const spawnItem = document.createElement('div');
+                spawnItem.style.cssText = 'background: rgba(255, 255, 255, 0.05); padding: 12px; border-radius: 6px; margin-bottom: 8px; border: 1px solid rgba(255, 255, 255, 0.1); display: flex; justify-content: space-between; align-items: center;';
+                
+                const spawnInfo = document.createElement('div');
+                spawnInfo.style.cssText = 'flex: 1;';
+                spawnInfo.innerHTML = `
+                    <div style="color: #fff; font-weight: bold; margin-bottom: 4px;">Spawn #${spawn.index}</div>
+                    <div style="color: #aaa; font-size: 12px;">
+                        Type: <span style="color: ${spawn.team === 1 ? '#FF4444' : spawn.team === 2 ? '#4CAF50' : '#44AAFF'}">${spawn.type}</span>
+                    </div>
+                    <div style="color: #888; font-size: 11px; margin-top: 4px;">
+                        X: ${spawn.x.toFixed(2)} | Y: ${spawn.y.toFixed(2)} | Z: ${spawn.z.toFixed(2)}
+                    </div>
+                `;
+                
+                const teleportBtn = document.createElement('button');
+                teleportBtn.textContent = 'Teleport';
+                teleportBtn.style.cssText = 'background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: all 0.3s; margin-left: 12px;';
+                teleportBtn.onmouseover = function() { this.style.transform = 'scale(1.05)'; this.style.boxShadow = '0 4px 12px rgba(102, 126, 234, 0.4)'; };
+                teleportBtn.onmouseout = function() { this.style.transform = 'scale(1)'; this.style.boxShadow = 'none'; };
+                teleportBtn.onclick = function() {
+                    Utils.sendNuiCallback('teleportToSpawn', { spawnIndex: spawn.index });
+                };
+                
+                spawnItem.appendChild(spawnInfo);
+                spawnItem.appendChild(teleportBtn);
+                content.appendChild(spawnItem);
+            });
+        }
+        
+        // Add back button
+        const backBtn = document.createElement('button');
+        backBtn.textContent = '← Back to Editor';
+        backBtn.style.cssText = 'width: 100%; background: rgba(255, 255, 255, 0.1); color: white; border: 1px solid rgba(255, 255, 255, 0.2); padding: 12px; border-radius: 6px; cursor: pointer; font-weight: bold; margin-top: 12px; transition: all 0.3s;';
+        backBtn.onmouseover = function() { this.style.background = 'rgba(255, 255, 255, 0.2)'; };
+        backBtn.onmouseout = function() { this.style.background = 'rgba(255, 255, 255, 0.1)'; };
+        backBtn.onclick = function() {
+            Utils.sendNuiCallback('closeSpawnViewer', {});
+        };
+        content.appendChild(backBtn);
+        
+        // Clear navigation flag when spawn viewer is shown (navigation complete)
+        MenuManager.isNavigating = false;
+        MenuManager.show(MENU_IDS.SPAWN_VIEWER);
+    },
 
     /**
      * Display admin dashboard
@@ -2777,6 +2864,11 @@ window.addEventListener('message', function(event) {
         case 'showTeamMenu':
             MenuHandlers.displayTeamMenu();
             break;
+        case 'showSpawnViewer':
+            // Clear navigation flag before showing spawn viewer (client manages focus explicitly)
+            MenuManager.isNavigating = false;
+            MenuHandlers.displaySpawnViewer(data);
+            break;
         case 'showDialog':
             // If showing dialog for map name (during save), keep navigation flag
             // Otherwise, clear it (dialog is standalone)
@@ -2797,8 +2889,9 @@ window.addEventListener('message', function(event) {
                 // we should clear the navigation flag so the client's focus management works properly
                 const isEditorMenu = data.menu === MENU_IDS.EDITOR;
                 const isDialog = data.menu === MENU_IDS.DIALOG;
-                if (isEditorMenu || isDialog) {
-                    // Client manages focus explicitly for editor menu (clearMap/saveMap) and dialog (map name)
+                const isSpawnViewer = data.menu === MENU_IDS.SPAWN_VIEWER;
+                if (isEditorMenu || isDialog || isSpawnViewer) {
+                    // Client manages focus explicitly for editor menu (clearMap/saveMap), dialog (map name), and spawnViewer (teleport)
                     // Clear navigation flag immediately and force immediate hide (no animation delay)
                     // This ensures menu is fully hidden before client sets focus to false
                     MenuManager.isNavigating = false;
@@ -2820,6 +2913,15 @@ window.addEventListener('message', function(event) {
                 // If no menu specified, hide all (this is a true close, release focus)
                 MenuManager.isNavigating = false;
                 MenuManager.hideAll();
+                // Force hide spawnViewer specifically if it exists
+                const spawnViewerMenu = MenuManager.get(MENU_IDS.SPAWN_VIEWER);
+                if (spawnViewerMenu) {
+                    spawnViewerMenu.classList.remove('active');
+                    spawnViewerMenu.classList.add('hidden');
+                    if (MenuManager.currentMenu === MENU_IDS.SPAWN_VIEWER) {
+                        MenuManager.currentMenu = null;
+                    }
+                }
             }
             break;
         case 'showPressE':
