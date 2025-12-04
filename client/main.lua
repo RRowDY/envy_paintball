@@ -1828,46 +1828,77 @@ function StartMapEditor()
                 local camCoords = GetCamCoord(freecam)
                 local camRot = GetCamRot(freecam, 2)
                 local playerPed = PlayerPedId()
+                
+                -- Use raycast to get the exact X, Y, Z where the camera is aiming
                 local hit, endCoords, entityHit = RayCastFromCamera(camCoords, camRot, 1000.0, playerPed)
                 
-                local newAimPosition = nil
+                local aimX, aimY, aimZ
                 if hit == 1 and endCoords then
-                    local hitX, hitY = endCoords.x, endCoords.y
-                    local topPoint = vector3(hitX, hitY, endCoords.z + 100.0)
-                    local bottomPoint = vector3(hitX, hitY, endCoords.z - 100.0)
-                    local downRayHandle = StartShapeTestLosProbe(topPoint.x, topPoint.y, topPoint.z, bottomPoint.x, bottomPoint.y, bottomPoint.z, -1, 0, 4)
-                    local downRetval, downHit, downEndCoords, downSurfaceNormal, downEntityHit = GetShapeTestResult(downRayHandle)
-                    
-                    local finalZ = endCoords.z
-                    if downHit == 1 and downEndCoords then
-                        finalZ = downEndCoords.z
-                    end
-                    
-                    local foundGround, groundZ = GetGroundZFor_3dCoord(hitX, hitY, endCoords.z + 50.0)
-                    if foundGround and groundZ > finalZ - 5.0 then
-                        finalZ = groundZ
-                    end
-                    
-                    if finalZ < camCoords.z - 200.0 then
-                        finalZ = camCoords.z - 10.0
-                    end
-                    
-                    newAimPosition = vector3(hitX, hitY, finalZ + 0.1)
+                    -- Use the exact X, Y, Z from the raycast hit
+                    aimX, aimY, aimZ = endCoords.x, endCoords.y, endCoords.z
                 else
+                    -- Fallback: project forward if raycast doesn't hit
                     local direction = RotationToDirection(camRot)
-                    local testPos = camCoords + direction * 50.0
-                    local foundGround, groundZ = GetGroundZFor_3dCoord(testPos.x, testPos.y, testPos.z + 50.0)
-                    if foundGround then
-                        newAimPosition = vector3(testPos.x, testPos.y, groundZ + 0.5)
-                    else
-                        foundGround, groundZ = GetGroundZFor_3dCoord(testPos.x, testPos.y, camCoords.z)
+                    local aimDistance = 50.0
+                    aimX = camCoords.x + direction.x * aimDistance
+                    aimY = camCoords.y + direction.y * aimDistance
+                    aimZ = camCoords.z + direction.z * aimDistance
+                end
+                
+                -- Determine if we're aiming at ground or a roof
+                -- If aim Z is below or near camera level, it's likely ground
+                -- If aim Z is way above camera, it's likely a roof
+                local finalZ = aimZ
+                
+                -- If aim Z is significantly above camera (likely a roof), find ground at nearby points
+                if aimZ > camCoords.z + 5.0 then
+                    -- Check multiple nearby points to find the lowest ground level
+                    local checkPoints = {
+                        {0, 0},      -- Center
+                        {2, 0},      -- North
+                        {-2, 0},     -- South
+                        {0, 2},      -- East
+                        {0, -2},     -- West
+                        {1.5, 1.5},  -- NE
+                        {-1.5, 1.5}, -- NW
+                        {1.5, -1.5}, -- SE
+                        {-1.5, -1.5} -- SW
+                    }
+                    
+                    local groundLevels = {}
+                    for _, offset in ipairs(checkPoints) do
+                        local checkX = aimX + offset[1]
+                        local checkY = aimY + offset[2]
+                        -- Try GetGroundZFor_3dCoord from camera height
+                        local foundGround, groundZ = GetGroundZFor_3dCoord(checkX, checkY, camCoords.z)
                         if foundGround then
-                            newAimPosition = vector3(testPos.x, testPos.y, groundZ + 0.5)
-                        else
-                            newAimPosition = vector3(testPos.x, testPos.y, testPos.z)
+                            -- Only accept if it's below camera (likely actual ground)
+                            if groundZ < camCoords.z + 10.0 then
+                                table.insert(groundLevels, groundZ)
+                            end
                         end
                     end
+                    
+                    -- Use the lowest ground level found, or average if multiple
+                    if #groundLevels > 0 then
+                        table.sort(groundLevels)
+                        finalZ = groundLevels[1] -- Use the lowest point
+                    else
+                        -- If no ground found nearby, estimate based on camera height
+                        -- Assume ground is roughly at camera level or slightly below
+                        finalZ = camCoords.z - 2.0
+                    end
+                else
+                    -- Aim Z is at or below camera level, likely ground - use it directly
+                    -- But verify with GetGroundZFor_3dCoord
+                    local foundGround, groundZ = GetGroundZFor_3dCoord(aimX, aimY, camCoords.z)
+                    if foundGround and groundZ < camCoords.z + 10.0 then
+                        -- Use the lower of aim Z or ground Z
+                        finalZ = math.min(aimZ, groundZ)
+                    end
                 end
+                
+                local newAimPosition = vector3(aimX, aimY, finalZ + 0.1)
                 
                 if newAimPosition then
                     aimPosition = newAimPosition
@@ -1913,7 +1944,7 @@ function StartMapEditor()
                         if not isInsideZone then
                             placeText = "~r~SPAWN POINT (OUTSIDE ZONE)~s~\n~r~Must be inside the zone boundary!~s~"
                         else
-                            placeText = "~y~SPAWN POINT~s~\nPress ~g~E~s~ to place"
+                            placeText = "~y~SPAWN POINT~s~\nPress ~g~E~s~ to place | Press ~r~ESC~s~ to finish"
                         end
                     end
                     DrawText3D(aimPosition.x, aimPosition.y, aimPosition.z + 2.0, placeText)
@@ -2013,10 +2044,9 @@ function StartMapEditor()
                             })
                                 PlaySoundFrontend(-1, "CHECKPOINT_PERFECT", "HUD_MINI_GAME_SOUNDSET", true)
                                 local teamText = selectedTeam and string.format(" (Team %d)", selectedTeam) or ""
-                                ESX.ShowNotification(string.format("~g~✓ Spawn point placed%s!~s~ Total: %d", teamText, #currentMapData.spawns), "success", 3000)
-                                placingPoint = false
-                                placingType = nil
-                                selectedTeam = nil
+                                ESX.ShowNotification(string.format("~g~✓ Spawn point placed%s!~s~ Total: %d | Press E to place another, ESC to finish~s~", teamText, #currentMapData.spawns), "success", 3000)
+                                -- Keep placement mode active so user can place multiple points without reselecting
+                                -- Only reset when user presses ESC
                             end
                         end
                     end
@@ -2279,7 +2309,7 @@ function StartPlacingSpawn(team)
     placingType = "spawn"
     SendNUIMessage({ action = 'hideMenu', menu = 'team' })
     SetNuiFocus(false, false)
-    ESX.ShowNotification("Aim where you want the spawn point and press ~g~E~s~", "info", 3000)
+    ESX.ShowNotification("Aim where you want the spawn point and press ~g~E~s~ to place. Press ~r~ESC~s~ when done.", "info", 4000)
 end
 
 function ClearMapData()
