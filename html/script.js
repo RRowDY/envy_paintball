@@ -1457,7 +1457,7 @@ const MenuHandlers = {
             maps.forEach(map => {
                 const item = Components.createMenuItem(
                     map.name,
-                    `Spawns: ${map.spawns.length} | Radius: ${map.radius.toFixed(1)}m`,
+                    null,
                     () => {
                         if (options.forDeleting) {
                             DialogManager.showConfirm(
@@ -1663,7 +1663,7 @@ const MenuHandlers = {
                 // Debug: log map data to see if previewImage is included
                 console.log('Map data:', map.name, 'PreviewImage:', map.previewImage);
                 return {
-                    text: `${map.name} (${map.spawns.length} spawns, ${map.radius.toFixed(1)}m radius)`,
+                    text: map.name,
                     value: map.id,
                     data: map
                 };
