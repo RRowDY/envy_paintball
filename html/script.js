@@ -92,7 +92,6 @@ const ImageCache = {
                 // Rate limited - wait with exponential backoff (capped)
                 const delay = Math.min(baseDelay * Math.pow(2, retryCount), maxDelay);
                 const delaySeconds = (delay / 1000).toFixed(1);
-                console.log(`Rate limited (429), retrying in ${delaySeconds}s (attempt ${retryCount + 1}/${maxRetries})...`);
                 await new Promise(resolve => setTimeout(resolve, delay));
                 return this.loadImage(imageUrl, retryCount + 1);
             }
@@ -108,7 +107,6 @@ const ImageCache = {
                 // Retry on 429 with exponential backoff (capped)
                 const delay = Math.min(baseDelay * Math.pow(2, retryCount), maxDelay);
                 const delaySeconds = (delay / 1000).toFixed(1);
-                console.log(`Rate limited, retrying in ${delaySeconds}s (attempt ${retryCount + 1}/${maxRetries})...`);
                 await new Promise(resolve => setTimeout(resolve, delay));
                 return this.loadImage(imageUrl, retryCount + 1);
             }
@@ -192,7 +190,6 @@ const Utils = {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data),
         }).catch(error => {
-            console.error(`NUI callback error (${event}):`, error);
             return { ok: false };
         });
     },
@@ -849,7 +846,6 @@ const Components = {
                 if (optionEl._previewTooltip) {
                     optionEl._previewTooltip.style.display = 'none';
                 }
-                // Note: We don't revoke cached blob URLs here - they're reused
                 // The cache will be cleared when the menu is fully closed if needed
             });
         };
@@ -920,7 +916,6 @@ const Components = {
                 let previewTooltip = null;
                 if (option.data && option.data.previewImage) {
                     const previewUrl = option.data.previewImage;
-                    console.log('Creating preview tooltip for:', option.data.name, 'with image:', previewUrl);
                     
                     // Create tooltip container - append to body to avoid overflow clipping
                     previewTooltip = document.createElement('div');
@@ -962,13 +957,11 @@ const Components = {
                         const match = imageUrl.match(/imgur\.com\/([a-zA-Z0-9]+)/);
                         if (match && match[1]) {
                             const imageId = match[1];
-                            // Use server callback to get base64 image
                             useProxy = true;
                             imageUrl = `https://i.imgur.com/${imageId}.png`;
                         }
                     }
                     
-                    // For imgur, try multiple approaches
                     const isImgur = imageUrl.includes('imgur.com');
                     
                     previewImg.style.cssText = `
@@ -985,8 +978,6 @@ const Components = {
                     
                     const tryLoadImgur = (formatIndex = 0) => {
                         if (formatIndex >= imgurFormats.length) {
-                            // All formats failed
-                            console.error('All imgur formats failed to load');
                             loadingText.textContent = 'Image failed to load\n(Imgur may be blocked)';
                             loadingText.style.color = 'var(--color-error)';
                             loadingText.style.fontSize = '11px';
@@ -995,45 +986,34 @@ const Components = {
                             return;
                         }
                         
-                        // Extract image ID and try different format
                         const match = imageUrl.match(/i\.imgur\.com\/([a-zA-Z0-9]+)/);
                         if (match && match[1]) {
                             const imageId = match[1];
                             const testUrl = `https://i.imgur.com/${imageId}${imgurFormats[formatIndex]}`;
-                            console.log(`Trying imgur format ${imgurFormats[formatIndex]}:`, testUrl);
                             
                             // Create fresh image element for each attempt
                             const testImg = new Image();
                             testImg.onload = () => {
-                                console.log('Imgur image loaded with format:', imgurFormats[formatIndex]);
                                 previewImg.src = testUrl;
                                 loadingText.style.display = 'none';
                             };
                             testImg.onerror = () => {
-                                console.log(`Format ${imgurFormats[formatIndex]} failed, trying next...`);
                                 tryLoadImgur(formatIndex + 1);
                             };
                             testImg.src = testUrl;
                         }
                     };
                     
-                    // Set up load handler
                     previewImg.onload = () => {
-                        console.log('Preview image loaded successfully:', imageUrl);
                         loadingText.style.display = 'none';
                     };
                     
-                    // Set up error handler
                     previewImg.onerror = (e) => {
-                        console.error('Failed to load preview image:', imageUrl);
                         
                         if (isImgur) {
-                            // Try different image formats
                             tryLoadImgur();
                         } else {
-                            // For non-imgur, try with CORS first
                             if (!previewImg.crossOrigin) {
-                                console.log('Retrying with CORS...');
                                 previewImg.crossOrigin = 'anonymous';
                                 previewImg.referrerPolicy = 'no-referrer';
                                 previewImg.src = '';
@@ -1041,20 +1021,15 @@ const Components = {
                                 return;
                             }
                             
-                            // If CORS also failed, try fetch method
-                            console.log('Trying fetch + blob method...');
                             loadingText.textContent = 'Loading...';
                             
-                            // Use ImageCache which handles retries and caching
                             ImageCache.getBlobUrl(imageUrl)
                             .then(blobUrl => {
-                                console.log('Successfully loaded image as blob via cache');
                                 previewImg.src = blobUrl;
                                 loadingText.style.display = 'none';
                                 optionElement._cachedImageUrl = imageUrl;
                             })
                             .catch(err => {
-                                console.error('Fetch also failed:', err.message);
                                 let errorMsg = 'Image failed to load';
                                 if (err.message.includes('429')) {
                                     errorMsg = 'Rate limited by image host\n(Please wait a moment)';
@@ -1072,27 +1047,21 @@ const Components = {
                         }
                     };
                     
-                    // Start loading - for imgur, use server callback to get base64
                     if (useProxy) {
-                        // Fetch image via server callback to bypass CORS
                         Utils.sendNuiCallback('getImageProxy', { imageUrl: imageUrl })
                         .then(response => {
                             // Parse JSON response
                             return response.json ? response.json() : response;
                         })
                         .then(data => {
-                            console.log('Proxy response:', data);
                             if (data && data.success && data.imageData) {
                                 previewImg.src = data.imageData;
                                 loadingText.style.display = 'none';
                             } else {
-                                console.error('Proxy returned invalid data:', data);
-                                throw new Error('Failed to fetch image via proxy: ' + (data ? JSON.stringify(data) : 'No response'));
+                                throw new Error('Failed to fetch image via proxy');
                             }
                         })
                         .catch(err => {
-                            console.error('Proxy fetch failed:', err);
-                            console.error('Image URL was:', imageUrl);
                             loadingText.textContent = 'Image failed to load\n(Proxy error)';
                             loadingText.style.color = 'var(--color-error)';
                             loadingText.style.fontSize = '11px';
@@ -1121,28 +1090,22 @@ const Components = {
                     optionElement.style.borderLeft = '3px solid var(--color-primary)';
                     textSpan.style.transform = 'translateX(3px)';
                     if (previewTooltip) {
-                        // Position tooltip relative to option element
                         const rect = optionElement.getBoundingClientRect();
                         const tooltipWidth = 300;
                         const tooltipHeight = 200;
                         const spacing = 10;
                         
-                        // Calculate position - try to the right first
                         let left = rect.right + spacing;
                         let top = rect.top;
                         
-                        // Check if tooltip would go off right edge of screen
                         if (left + tooltipWidth > window.innerWidth) {
-                            // Position to the left instead
                             left = rect.left - tooltipWidth - spacing;
                         }
                         
-                        // Check if tooltip would go off bottom edge
                         if (top + tooltipHeight > window.innerHeight) {
                             top = window.innerHeight - tooltipHeight - 10;
                         }
                         
-                        // Ensure it doesn't go off top edge
                         if (top < 10) {
                             top = 10;
                         }
@@ -1890,8 +1853,6 @@ const MenuHandlers = {
         const mapOptions = !maps || maps.length === 0
             ? [{ text: 'No maps available', value: null }]
             : maps.map(map => {
-                // Debug: log map data to see if previewImage is included
-                console.log('Map data:', map.name, 'PreviewImage:', map.previewImage);
                 return {
                     text: map.name,
                     value: map.id,
@@ -2407,7 +2368,6 @@ const MenuHandlers = {
     displayAdminDashboard(data) {
         const menu = MenuManager.get(MENU_IDS.ADMIN_DASHBOARD);
         if (!menu) {
-            console.error('Dashboard menu not found');
             return;
         }
 
@@ -2424,16 +2384,7 @@ const MenuHandlers = {
         const tabContents = menu.querySelectorAll('.dashboard-tab-content');
         
         if (tabs.length === 0 || tabContents.length === 0) {
-            console.error('Dashboard tabs or content not found', { 
-                tabs: tabs.length, 
-                contents: tabContents.length,
-                menuHTML: menu.innerHTML.substring(0, 500)
-            });
-            // Try to recreate the dashboard structure
             const contentWrapper = menu.querySelector('.dashboard-content-wrapper');
-            if (!contentWrapper) {
-                console.error('Dashboard content wrapper not found, menu structure may be incorrect');
-            }
             return;
         }
         
@@ -2539,20 +2490,17 @@ const MenuHandlers = {
     refreshDashboardTab(tabName, data) {
         const menu = MenuManager.get(MENU_IDS.ADMIN_DASHBOARD);
         if (!menu) {
-            console.error('Dashboard menu not found for refresh');
             return;
         }
 
         const content = menu.querySelector(`[data-tab-content="${tabName}"]`);
         if (!content) {
-            console.error(`Dashboard tab content not found for: ${tabName}`);
             return;
         }
 
         content.innerHTML = '';
 
         if (!data) {
-            console.warn('No data provided for dashboard refresh');
             return;
         }
         
@@ -3055,7 +3003,6 @@ const MenuHandlers = {
     showPlayerSearchDialog() {
         const menu = MenuManager.get(MENU_IDS.PLAYER_SEARCH);
         if (!menu) {
-            console.error("Player search menu not found");
             return;
         }
 
@@ -3070,7 +3017,6 @@ const MenuHandlers = {
         }
 
         if (!content) {
-            console.error("Player search content not found");
             return;
         }
 
@@ -3215,7 +3161,6 @@ const MenuHandlers = {
                         }
                     })
                     .catch((error) => {
-                        console.error('Search error:', error);
                         if (errorEl) {
                             errorEl.textContent = 'Failed to search. Please try again.';
                             errorEl.style.display = 'block';

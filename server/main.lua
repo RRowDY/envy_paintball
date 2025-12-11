@@ -1,11 +1,5 @@
 local ESX = exports['es_extended']:getSharedObject()
 
--- ============================================================================
--- IMAGE PROXY (for bypassing CORS with external images)
--- Uses server callback to fetch and return base64 encoded image
--- ============================================================================
-
--- Base64 encoding function
 local function base64encode(data)
     local b = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
     return ((data:gsub(".", function(x)
@@ -28,19 +22,15 @@ end
 
 ESX.RegisterServerCallback('envy_paintball:getImageProxy', function(source, cb, imageUrl)
     if not imageUrl or type(imageUrl) ~= 'string' then
-        print('^1[envy_paintball] getImageProxy: Invalid imageUrl^7')
         cb(nil)
         return
     end
     
-    -- Only allow imgur URLs for security
     if not string.find(imageUrl, 'imgur%.com') then
-        print('^1[envy_paintball] getImageProxy: Not an imgur URL^7')
         cb(nil)
         return
     end
     
-    -- Normalize imgur URL
     local normalizedUrl = imageUrl
     if string.find(imageUrl, 'imgur%.com') then
         local imageId = string.match(imageUrl, 'imgur%.com/([a-zA-Z0-9]+)')
@@ -49,13 +39,8 @@ ESX.RegisterServerCallback('envy_paintball:getImageProxy', function(source, cb, 
         end
     end
     
-    print('^2[envy_paintball] Fetching image from: ' .. normalizedUrl .. '^7')
-    
-    -- Fetch the image - PerformHttpRequest returns binary data that needs base64 encoding
     PerformHttpRequest(normalizedUrl, function(statusCode, data, headers)
-        print('^3[envy_paintball] HTTP Response: Status=' .. tostring(statusCode) .. ', Data length=' .. tostring(data and #data or 0) .. '^7')
         if statusCode == 200 and data and #data > 0 then
-            -- Encode binary data to base64
             local success, base64Data = pcall(function()
                 return base64encode(data)
             end)
@@ -64,11 +49,9 @@ ESX.RegisterServerCallback('envy_paintball:getImageProxy', function(source, cb, 
                 local dataUri = 'data:image/png;base64,' .. base64Data
                 cb(dataUri)
             else
-                print('^1[envy_paintball] Error encoding image to base64^7')
                 cb(nil)
             end
         else
-            -- Try other formats if PNG fails
             local formats = {'.jpg', '.jpeg'}
             local formatIndex = 1
             
@@ -518,7 +501,6 @@ local function UpdateScoreboard(match)
             scoreboardData.teamScores[i] = match.teamScores[i] or 0
         end
         -- Debug: Print team scores being sent
-        print(string.format("[Scoreboard Update] TDM - Team 1: %d, Team 2: %d", scoreboardData.teamScores[1] or 0, scoreboardData.teamScores[2] or 0))
     elseif gameModeId == "2v2_ramps" then
         -- 2v2: Use stored team scores (same as TDM)
         for i = 1, match.gameMode.teams do
