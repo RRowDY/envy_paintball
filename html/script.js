@@ -1939,7 +1939,6 @@ const MenuHandlers = {
         
         const cancelBtn = Components.createButton('Cancel', () => {
             MenuManager.hide(MENU_IDS.CREATE_MATCH);
-            MenuManager.show(MENU_IDS.MAIN);
         }, 'secondary', {
             style: { flex: '1', padding: '12px' }
         });
