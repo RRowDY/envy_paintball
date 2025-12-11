@@ -1516,6 +1516,42 @@ RegisterNetEvent('envy_paintball:setMapPreviewImage', function(mapId, previewIma
     end
 end)
 
+RegisterNetEvent('envy_paintball:renameMap', function(mapId, newName)
+    local source = source
+    
+    if not IsAdmin(source) then
+        TriggerClientEvent('ESX:Notify', source, "error", 5000, "You don't have permission to rename maps")
+        return
+    end
+    
+    if not mapId or type(mapId) ~= 'string' or #mapId == 0 then
+        TriggerClientEvent('ESX:Notify', source, "error", 5000, "Invalid map ID")
+        return
+    end
+    
+    if not newName or type(newName) ~= 'string' or #newName == 0 then
+        TriggerClientEvent('ESX:Notify', source, "error", 5000, "Invalid map name")
+        return
+    end
+    
+    -- Find and update map name
+    local found = false
+    for i, map in ipairs(maps) do
+        if map.id == mapId then
+            maps[i].name = newName
+            found = true
+            break
+        end
+    end
+    
+    if found then
+        SaveMaps()
+        TriggerClientEvent('ESX:Notify', source, "success", 5000, string.format("Map renamed to '%s' successfully!", newName))
+    else
+        TriggerClientEvent('ESX:Notify', source, "error", 5000, "Map not found")
+    end
+end)
+
 RegisterNetEvent('envy_paintball:deleteMap', function(mapId)
     local source = source
     

@@ -890,15 +890,22 @@ const Components = {
                     color: var(--color-text-primary);
                     cursor: pointer;
                     transition: all var(--transition-normal);
+                    border-left: 3px solid transparent;
                     border-bottom: 1px solid rgba(9, 135, 255, 0.1);
                     position: relative;
                 `;
                 
+                const textSpan = document.createElement('span');
                 if (option.text) {
-                    optionElement.textContent = option.text;
+                    textSpan.textContent = option.text;
                 } else {
-                    optionElement.textContent = option;
+                    textSpan.textContent = option;
                 }
+                textSpan.style.cssText = `
+                    display: inline-block;
+                    transition: transform var(--transition-normal);
+                `;
+                optionElement.appendChild(textSpan);
                 
                 // Add preview image support if available
                 let previewTooltip = null;
@@ -1019,7 +1026,7 @@ const Components = {
                 optionElement.addEventListener('mouseenter', (e) => {
                     optionElement.style.background = 'var(--color-bg-tertiary-hover)';
                     optionElement.style.borderLeft = '3px solid var(--color-primary)';
-                    optionElement.style.paddingLeft = 'calc(var(--spacing-lg) - 3px)';
+                    textSpan.style.transform = 'translateX(3px)';
                     if (previewTooltip) {
                         // Position tooltip relative to option element
                         const rect = optionElement.getBoundingClientRect();
@@ -1055,8 +1062,8 @@ const Components = {
                 
                 optionElement.addEventListener('mouseleave', () => {
                     optionElement.style.background = '';
-                    optionElement.style.borderLeft = '';
-                    optionElement.style.paddingLeft = '';
+                    optionElement.style.borderLeft = '3px solid transparent';
+                    textSpan.style.transform = 'translateX(0)';
                     if (previewTooltip) {
                         previewTooltip.style.display = 'none';
                     }
@@ -1114,6 +1121,136 @@ const Components = {
         };
         
         return dropdownContainer;
+    },
+
+    /**
+     * Create a context menu dropdown (for "..." buttons)
+     */
+    createContextMenu(options, buttonText = '...') {
+        const container = document.createElement('div');
+        container.style.position = 'relative';
+        container.style.display = 'inline-block';
+
+        const button = Components.createButton(buttonText, () => {}, 'secondary', {
+            style: {
+                padding: '6px 12px',
+                fontSize: '14px',
+                minWidth: '32px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+            }
+        });
+        
+        const menu = document.createElement('div');
+        menu.style.cssText = `
+            position: absolute;
+            top: calc(100% + 4px);
+            right: 0;
+            background: var(--color-bg-secondary);
+            border: 1px solid var(--color-primary-dark);
+            border-radius: var(--radius-lg);
+            min-width: 150px;
+            z-index: 1000;
+            display: none;
+            box-shadow: var(--shadow-lg);
+            overflow: hidden;
+        `;
+
+        options.forEach((option, index) => {
+            const menuItem = document.createElement('div');
+            const isFirst = index === 0;
+            const isLast = index === options.length - 1;
+            menuItem.style.cssText = `
+                padding: var(--spacing-md) var(--spacing-lg);
+                color: var(--color-text-primary);
+                cursor: pointer;
+                transition: all var(--transition-normal);
+                border-left: 3px solid transparent;
+                border-bottom: ${index < options.length - 1 ? '1px solid rgba(9, 135, 255, 0.1)' : 'none'};
+                ${isFirst ? 'border-top-left-radius: var(--radius-lg);' : ''}
+                ${isLast ? 'border-bottom-left-radius: var(--radius-lg);' : ''}
+                font-size: var(--font-size-base);
+                font-family: var(--font-family);
+            `;
+            
+            const textSpan = document.createElement('span');
+            textSpan.textContent = option.label;
+            textSpan.style.cssText = `
+                display: inline-block;
+                transition: transform var(--transition-normal);
+            `;
+            
+            if (option.danger) {
+                menuItem.style.color = '#ff4444';
+                textSpan.style.color = '#ff4444';
+            }
+            
+            menuItem.appendChild(textSpan);
+            
+            menuItem.addEventListener('mouseenter', () => {
+                if (option.danger) {
+                    menuItem.style.background = 'rgba(255, 68, 68, 0.15)';
+                    menuItem.style.borderLeft = '3px solid #ff4444';
+                } else {
+                    menuItem.style.background = 'var(--color-bg-tertiary-hover)';
+                    menuItem.style.borderLeft = '3px solid var(--color-primary)';
+                }
+                textSpan.style.transform = 'translateX(3px)';
+            });
+            
+            menuItem.addEventListener('mouseleave', () => {
+                menuItem.style.background = '';
+                menuItem.style.borderLeft = '3px solid transparent';
+                textSpan.style.transform = 'translateX(0)';
+            });
+            
+            menuItem.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (option.onClick) {
+                    option.onClick();
+                }
+                menu.style.display = 'none';
+                DropdownManager.unregister({ container: menu });
+            });
+            
+            menu.appendChild(menuItem);
+        });
+
+        const contextMenu = {
+            container: container,
+            button: button,
+            menu: menu,
+            isOpen: false,
+            open() {
+                DropdownManager.closeAll(this);
+                menu.style.display = 'block';
+                this.isOpen = true;
+                DropdownManager.register(this);
+            },
+            close() {
+                menu.style.display = 'none';
+                this.isOpen = false;
+                DropdownManager.unregister(this);
+            },
+            toggle() {
+                if (this.isOpen) {
+                    this.close();
+                } else {
+                    this.open();
+                }
+            }
+        };
+
+        button.addEventListener('click', (e) => {
+            e.stopPropagation();
+            contextMenu.toggle();
+        });
+
+        container.appendChild(button);
+        container.appendChild(menu);
+
+        return contextMenu;
     },
 };
 
@@ -2445,39 +2582,63 @@ const MenuHandlers = {
                     } 
                 });
 
-                const editBtn = Components.createButton('Edit', () => {
-                    MenuManager.hide(MENU_IDS.ADMIN_DASHBOARD);
-                    Utils.sendNuiCallback('loadMapForEdit', { mapId: map.id });
-                }, 'primary', { style: { padding: '6px 12px', fontSize: '12px' } });
-
-                const deleteBtn = Components.createButton('Delete', () => {
-                    DialogManager.showConfirm(
-                        `Are you sure you want to delete map "${map.name}"?\n\nThis action cannot be undone.`,
-                        () => {
-                            // Hide confirm dialog without releasing focus (dashboard is still open)
-                            MenuManager.hide(MENU_IDS.CONFIRM, { checkFocusRelease: false });
-                            const menu = MenuManager.get(MENU_IDS.ADMIN_DASHBOARD);
-                            const currentTab = menu?._currentTab || 'maps';
-                            // Mark as from dashboard to prevent focus release
-                            Utils.sendNuiCallback('deleteMap', { mapId: map.id, fromDashboard: true }).then(() => {
-                                // Refresh dashboard preserving current tab
-                                Utils.sendNuiCallback('refreshDashboard', { preserveTab: currentTab });
-                            });
+                // Context menu with Rename, Edit Map, Delete
+                const contextMenu = Components.createContextMenu([
+                    {
+                        label: 'Rename',
+                        onClick: () => {
+                            DialogManager.showDialog(
+                                'Rename Map',
+                                'Enter new map name',
+                                (newName) => {
+                                    if (newName && newName.trim()) {
+                                        const menu = MenuManager.get(MENU_IDS.ADMIN_DASHBOARD);
+                                        const currentTab = menu?._currentTab || 'maps';
+                                        Utils.sendNuiCallback('renameMap', { 
+                                            mapId: map.id, 
+                                            newName: newName.trim(),
+                                            fromDashboard: true
+                                        }).then(() => {
+                                            // Refresh dashboard preserving current tab
+                                            Utils.sendNuiCallback('refreshDashboard', { preserveTab: currentTab });
+                                        });
+                                    }
+                                },
+                                { value: map.name }
+                            );
                         }
-                    );
-                }, 'secondary', {
-                    style: {
-                        padding: '6px 12px',
-                        fontSize: '12px',
-                        background: 'rgba(255, 68, 68, 0.2)',
-                        borderColor: '#ff4444',
-                        color: '#ff4444',
                     },
-                });
+                    {
+                        label: 'Edit Map',
+                        onClick: () => {
+                            MenuManager.hide(MENU_IDS.ADMIN_DASHBOARD);
+                            Utils.sendNuiCallback('loadMapForEdit', { mapId: map.id });
+                        }
+                    },
+                    {
+                        label: 'Delete',
+                        danger: true,
+                        onClick: () => {
+                            DialogManager.showConfirm(
+                                `Are you sure you want to delete map "${map.name}"?\n\nThis action cannot be undone.`,
+                                () => {
+                                    // Hide confirm dialog without releasing focus (dashboard is still open)
+                                    MenuManager.hide(MENU_IDS.CONFIRM, { checkFocusRelease: false });
+                                    const menu = MenuManager.get(MENU_IDS.ADMIN_DASHBOARD);
+                                    const currentTab = menu?._currentTab || 'maps';
+                                    // Mark as from dashboard to prevent focus release
+                                    Utils.sendNuiCallback('deleteMap', { mapId: map.id, fromDashboard: true }).then(() => {
+                                        // Refresh dashboard preserving current tab
+                                        Utils.sendNuiCallback('refreshDashboard', { preserveTab: currentTab });
+                                    });
+                                }
+                            );
+                        }
+                    }
+                ]);
 
                 right.appendChild(previewBtn);
-                right.appendChild(editBtn);
-                right.appendChild(deleteBtn);
+                right.appendChild(contextMenu.container);
 
                 item.appendChild(left);
                 item.appendChild(right);

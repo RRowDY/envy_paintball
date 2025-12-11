@@ -476,6 +476,20 @@ RegisterNUICallback('setMapPreviewImage', function(data, cb)
     cb('ok')
 end)
 
+RegisterNUICallback('renameMap', function(data, cb)
+    local mapId = data.mapId
+    local newName = data.newName
+    
+    if not mapId or not newName or newName == "" then
+        ESX.ShowNotification("Invalid map ID or name!", "error", 3000)
+        cb('ok')
+        return
+    end
+    
+    TriggerServerEvent('envy_paintball:renameMap', mapId, newName)
+    cb('ok')
+end)
+
 RegisterNUICallback('deleteMap', function(data, cb)
     local mapId = data.mapId
     
