@@ -28,6 +28,8 @@ local editorZone = nil
 local previewZone = nil
 local zoneDrawThreads = {} -- Track threads that draw zones
 local spawnProtected = false
+local uiCloseTime = 0
+local UI_COOLDOWN = 500 -- 0.5 seconds cooldown after UI closes
 local selectedSpawnIndex = nil -- Track which spawn is selected for highlighting
 local spawnProtectionTime = 0
 local isDead = false
@@ -155,7 +157,10 @@ CreateThread(function()
                 ShowPressEUI(textCoords, "Press ~eb~E~s~ to open paintball menu", distance, Config.InteractionDistance)
 
                 if IsControlJustPressed(0, Config.InteractionKey) and not inMatch then
-                    if myMatchId then
+                    -- Check cooldown - prevent opening UI immediately after closing
+                    local currentTime = GetGameTimer()
+                    if currentTime - uiCloseTime >= UI_COOLDOWN then
+                        if myMatchId then
                         ESX.TriggerServerCallback('envy_paintball:getMatchData', function(matchData)
                             if matchData then
                                 myMatchData = matchData
@@ -178,14 +183,15 @@ CreateThread(function()
                                 canStartMatch = canStartMatch
                             })
                         end, myMatchId)
-                    else
-                        SetNuiFocus(true, true)
-                        SendNUIMessage({
-                            action = 'showMainMenu',
-                            hasMatch = false,
-                            inMatch = currentMatchId ~= nil,
-                            canStartMatch = false
-                        })
+                        else
+                            SetNuiFocus(true, true)
+                            SendNUIMessage({
+                                action = 'showMainMenu',
+                                hasMatch = false,
+                                inMatch = currentMatchId ~= nil,
+                                canStartMatch = false
+                            })
+                        end
                     end
                 end
             else
@@ -645,6 +651,7 @@ RegisterNUICallback('closeMenu', function(data, cb)
     CreateThread(function()
         Wait(50)
         SetNuiFocus(false, false)
+        uiCloseTime = GetGameTimer() -- Set cooldown when UI closes
     end)
     
     cb('ok')
