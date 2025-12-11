@@ -216,6 +216,19 @@ function OpenGameModeMenu()
     })
 end
 
+function OpenCreateMatchForm()
+    ESX.TriggerServerCallback('envy_paintball:getMaps', function(maps)
+        SetNuiFocus(false, false)
+        Wait(50)
+        SetNuiFocus(true, true)
+        SendNUIMessage({
+            action = 'showCreateMatchForm',
+            gameModes = Config.GameModes,
+            maps = maps or {}
+        })
+    end)
+end
+
 function OpenMatchBrowser()
     ESX.TriggerServerCallback('envy_paintball:getActiveMatches', function(matches)
         SetNuiFocus(false, false)
@@ -449,6 +462,20 @@ RegisterNUICallback('loadMapForEdit', function(data, cb)
     cb('ok')
 end)
 
+RegisterNUICallback('setMapPreviewImage', function(data, cb)
+    local mapId = data.mapId
+    local previewImage = data.previewImage
+    
+    if not mapId or not previewImage then
+        ESX.ShowNotification("Invalid map ID or preview image!", "error", 3000)
+        cb('ok')
+        return
+    end
+    
+    TriggerServerEvent('envy_paintball:setMapPreviewImage', mapId, previewImage)
+    cb('ok')
+end)
+
 RegisterNUICallback('deleteMap', function(data, cb)
     local mapId = data.mapId
     
@@ -477,7 +504,7 @@ RegisterNUICallback('mainAction', function(data, cb)
     if action == 'create' then
         SendNUIMessage({ action = 'hideMenu', menu = 'main' })
         Wait(200)
-        OpenGameModeMenu()
+        OpenCreateMatchForm()
     elseif action == 'browse' then
         SendNUIMessage({ action = 'hideMenu', menu = 'main' })
         Wait(200)
@@ -563,13 +590,6 @@ RegisterNUICallback('joinMatch', function(data, cb)
 end)
 
 RegisterNUICallback('selectWeapon', function(data, cb)
-    if not currentMatchId then
-        ESX.ShowNotification("You are not in a match!", "error")
-        SetNuiFocus(false, false)
-        cb('ok')
-        return
-    end
-    
     ESX.TriggerServerCallback('envy_paintball:getWeapons', function(categories, weapons)
         if not categories or not weapons then
             ESX.ShowNotification("Failed to load weapons!", "error")
@@ -583,7 +603,7 @@ RegisterNUICallback('selectWeapon', function(data, cb)
             action = 'showWeaponSelection',
             categories = categories,
             weapons = weapons,
-            forMatch = true
+            forMatch = currentMatchId ~= nil
         })
     end)
     

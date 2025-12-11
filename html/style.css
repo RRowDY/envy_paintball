@@ -311,6 +311,152 @@ div, span, p, h1, h2, h3, h4, h5, h6, label, li, td, th {
     color: var(--color-text-placeholder);
 }
 
+/* ============================================================================
+   CUSTOM DROPDOWN - STYLED LIKE MENU ITEMS
+   ============================================================================ */
+.custom-dropdown {
+    position: relative;
+    width: 100%;
+}
+
+.custom-dropdown-button {
+    background: var(--color-bg-tertiary);
+    border: 1px solid var(--color-primary-dark);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-lg);
+    color: var(--color-text-primary);
+    font-size: var(--font-size-base);
+    font-family: var(--font-family);
+    cursor: pointer;
+    transition: all var(--transition-normal);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: relative;
+    user-select: none;
+}
+
+.custom-dropdown-button:hover {
+    background: var(--color-bg-tertiary-hover);
+    border-color: var(--color-primary-light);
+    box-shadow: var(--shadow-primary);
+}
+
+.custom-dropdown-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    background: var(--color-bg-secondary);
+    border: 1px solid var(--color-primary-dark);
+    border-radius: var(--radius-lg);
+    max-height: 250px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    z-index: 1000;
+    display: none;
+    box-shadow: var(--shadow-lg);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+}
+
+.custom-dropdown-menu::-webkit-scrollbar {
+    width: 6px;
+}
+
+.custom-dropdown-menu::-webkit-scrollbar-track {
+    background: rgba(20, 20, 20, 0.5);
+    border-radius: 3px;
+}
+
+.custom-dropdown-menu::-webkit-scrollbar-thumb {
+    background: var(--color-primary-light);
+    border-radius: 3px;
+}
+
+.custom-dropdown-menu::-webkit-scrollbar-thumb:hover {
+    background: rgba(9, 135, 255, 0.7);
+}
+
+.custom-dropdown-option {
+    padding: var(--spacing-lg);
+    color: var(--color-text-primary);
+    cursor: pointer;
+    transition: all var(--transition-normal);
+    border-bottom: 1px solid rgba(9, 135, 255, 0.1);
+    font-size: var(--font-size-base);
+    font-family: var(--font-family);
+}
+
+.custom-dropdown-option:first-child {
+    border-top-left-radius: var(--radius-lg);
+    border-top-right-radius: var(--radius-lg);
+}
+
+.custom-dropdown-option:last-child {
+    border-bottom: none;
+    border-bottom-left-radius: var(--radius-lg);
+    border-bottom-right-radius: var(--radius-lg);
+}
+
+.custom-dropdown-option:hover {
+    background: var(--color-bg-tertiary-hover);
+    border-left: 3px solid var(--color-primary);
+    padding-left: calc(var(--spacing-lg) - 3px);
+}
+
+.custom-dropdown-option:active {
+    background: var(--color-primary-dark);
+}
+
+/* ============================================================================
+   DROPDOWN PREVIEW TOOLTIP
+   ============================================================================ */
+.dropdown-preview-tooltip {
+    position: fixed;
+    width: 300px;
+    height: 200px;
+    background: var(--color-bg-secondary);
+    border: 2px solid var(--color-primary);
+    border-radius: var(--radius-lg);
+    z-index: 1000001 !important;
+    display: none;
+    overflow: hidden;
+    box-shadow: var(--shadow-lg);
+    pointer-events: none;
+    transition: opacity var(--transition-normal);
+}
+
+.dropdown-preview-tooltip img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+/* ============================================================================
+   PIN INPUT CONTAINER - SMOOTH TRANSITION
+   ============================================================================ */
+.pin-input-container {
+    overflow: hidden;
+    transition: max-height var(--transition-normal), opacity var(--transition-normal), margin-top var(--transition-normal);
+    max-height: 0;
+    opacity: 0;
+    margin-top: 0;
+}
+
+.pin-input-container.pin-input-visible {
+    max-height: 200px;
+    opacity: 1;
+    margin-top: 10px;
+}
+
+.pin-input-container.pin-input-hidden {
+    max-height: 0;
+    opacity: 0;
+    margin-top: 0;
+}
+
 .dialog-buttons {
     display: flex;
     gap: var(--spacing-md);
