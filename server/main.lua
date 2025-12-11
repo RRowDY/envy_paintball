@@ -1,6 +1,120 @@
 local ESX = exports['es_extended']:getSharedObject()
 
 -- ============================================================================
+-- IMAGE PROXY (for bypassing CORS with external images)
+-- Uses server callback to fetch and return base64 encoded image
+-- ============================================================================
+
+-- Base64 encoding function
+local function base64encode(data)
+    local b = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    return ((data:gsub(".", function(x)
+        local r, b = "", x:byte()
+        for i = 8, 1, -1 do
+            r = r .. (b % 2 ^ i - b % 2 ^ (i - 1) > 0 and "1" or "0")
+        end
+        return r
+    end) .. "0000"):gsub("%d%d%d?%d?%d?%d?", function(x)
+        if (#x < 6) then
+            return ""
+        end
+        local c = 0
+        for i = 1, 6 do
+            c = c + (x:sub(i, i) == "1" and 2 ^ (6 - i) or 0)
+        end
+        return b:sub(c + 1, c + 1)
+    end) .. ({"", "==", "="})[#data % 3 + 1])
+end
+
+ESX.RegisterServerCallback('envy_paintball:getImageProxy', function(source, cb, imageUrl)
+    if not imageUrl or type(imageUrl) ~= 'string' then
+        print('^1[envy_paintball] getImageProxy: Invalid imageUrl^7')
+        cb(nil)
+        return
+    end
+    
+    -- Only allow imgur URLs for security
+    if not string.find(imageUrl, 'imgur%.com') then
+        print('^1[envy_paintball] getImageProxy: Not an imgur URL^7')
+        cb(nil)
+        return
+    end
+    
+    -- Normalize imgur URL
+    local normalizedUrl = imageUrl
+    if string.find(imageUrl, 'imgur%.com') then
+        local imageId = string.match(imageUrl, 'imgur%.com/([a-zA-Z0-9]+)')
+        if imageId then
+            normalizedUrl = 'https://i.imgur.com/' .. imageId .. '.png'
+        end
+    end
+    
+    print('^2[envy_paintball] Fetching image from: ' .. normalizedUrl .. '^7')
+    
+    -- Fetch the image - PerformHttpRequest returns binary data that needs base64 encoding
+    PerformHttpRequest(normalizedUrl, function(statusCode, data, headers)
+        print('^3[envy_paintball] HTTP Response: Status=' .. tostring(statusCode) .. ', Data length=' .. tostring(data and #data or 0) .. '^7')
+        if statusCode == 200 and data and #data > 0 then
+            -- Encode binary data to base64
+            local success, base64Data = pcall(function()
+                return base64encode(data)
+            end)
+            
+            if success and base64Data then
+                local dataUri = 'data:image/png;base64,' .. base64Data
+                cb(dataUri)
+            else
+                print('^1[envy_paintball] Error encoding image to base64^7')
+                cb(nil)
+            end
+        else
+            -- Try other formats if PNG fails
+            local formats = {'.jpg', '.jpeg'}
+            local formatIndex = 1
+            
+            local function tryNextFormat()
+                if formatIndex > #formats then
+                    cb(nil)
+                    return
+                end
+                
+                local imageId = string.match(imageUrl, 'imgur%.com/([a-zA-Z0-9]+)')
+                if imageId then
+                    local testUrl = 'https://i.imgur.com/' .. imageId .. formats[formatIndex]
+                    PerformHttpRequest(testUrl, function(statusCode2, data2)
+                        if statusCode2 == 200 and data2 and #data2 > 0 then
+                            local success, base64Data = pcall(function()
+                                return base64encode(data2)
+                            end)
+                            
+                            if success and base64Data then
+                                local mimeType = 'image/jpeg'
+                                local dataUri = 'data:' .. mimeType .. ';base64,' .. base64Data
+                                cb(dataUri)
+                            else
+                                formatIndex = formatIndex + 1
+                                tryNextFormat()
+                            end
+                        else
+                            formatIndex = formatIndex + 1
+                            tryNextFormat()
+                        end
+                    end, 'GET', '', {
+                        ['User-Agent'] = 'FiveM-Resource'
+                    })
+                else
+                    cb(nil)
+                end
+            end
+            
+            tryNextFormat()
+        end
+    end, 'GET', '', {
+        ['User-Agent'] = 'FiveM-Resource'
+    })
+end)
+
+-- ============================================================================
 -- DATA STRUCTURES
 -- ============================================================================
 local activeMatches = {}
@@ -1491,18 +1605,29 @@ RegisterNetEvent('envy_paintball:setMapPreviewImage', function(mapId, previewIma
         return
     end
     
-    -- Validate URL ends with .png, .jpg, or .jpeg
-    local urlLower = string.lower(previewImage)
-    if not (string.match(urlLower, "%.png$") or string.match(urlLower, "%.jpg$") or string.match(urlLower, "%.jpeg$")) then
-        TriggerClientEvent('ESX:Notify', source, "error", 5000, "URL must end with .png, .jpg, or .jpeg")
-        return
+    -- Normalize imgur URLs and validate
+    local normalizedUrl = previewImage
+    if string.find(string.lower(previewImage), "imgur%.com") then
+        -- Extract image ID from imgur URL
+        local imageId = string.match(previewImage, "imgur%.com/([a-zA-Z0-9]+)")
+        if imageId then
+            -- Normalize to direct image format
+            normalizedUrl = "https://i.imgur.com/" .. imageId .. ".png"
+        end
+    else
+        -- For non-imgur URLs, validate they end with image extension
+        local urlLower = string.lower(previewImage)
+        if not (string.match(urlLower, "%.png$") or string.match(urlLower, "%.jpg$") or string.match(urlLower, "%.jpeg$")) then
+            TriggerClientEvent('ESX:Notify', source, "error", 5000, "URL must end with .png, .jpg, or .jpeg")
+            return
+        end
     end
     
     -- Find and update map
     local found = false
     for i, map in ipairs(maps) do
         if map.id == mapId then
-            maps[i].previewImage = previewImage
+            maps[i].previewImage = normalizedUrl
             found = true
             break
         end

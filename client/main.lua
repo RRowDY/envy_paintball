@@ -482,6 +482,22 @@ RegisterNUICallback('setMapPreviewImage', function(data, cb)
     cb('ok')
 end)
 
+RegisterNUICallback('getImageProxy', function(data, cb)
+    local imageUrl = data.imageUrl
+    if not imageUrl then
+        cb({ success = false })
+        return
+    end
+    
+    ESX.TriggerServerCallback('envy_paintball:getImageProxy', function(imageData)
+        if imageData then
+            cb({ success = true, imageData = imageData })
+        else
+            cb({ success = false })
+        end
+    end, imageUrl)
+end)
+
 RegisterNUICallback('renameMap', function(data, cb)
     local mapId = data.mapId
     local newName = data.newName

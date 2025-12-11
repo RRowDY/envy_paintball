@@ -72,6 +72,15 @@ const ImageCache = {
         const baseDelay = 2000; // 2 seconds base delay (increased from 1s)
         const maxDelay = 30000; // Cap at 30 seconds max delay
         
+        // For imgur, images should load directly without fetch (they work in img tags)
+        // Only use fetch for other hosts that might need CORS handling
+        const isImgur = imageUrl.includes('imgur.com');
+        
+        if (isImgur) {
+            // For imgur, return the URL directly - it will work in img tags
+            return imageUrl;
+        }
+        
         try {
             const response = await fetch(imageUrl, {
                 mode: 'cors',
@@ -945,24 +954,23 @@ const Components = {
                     previewTooltip.appendChild(loadingText);
                     
                     const previewImg = document.createElement('img');
-                    // For imgur URLs, sometimes we need to use the direct link format
-                    // Convert imgur.com/ID to i.imgur.com/ID.png if needed
+                    // Normalize imgur URLs and use server callback to bypass CORS
                     let imageUrl = previewUrl;
-                    if (imageUrl.includes('imgur.com') && !imageUrl.includes('i.imgur.com')) {
-                        // Convert https://imgur.com/E6mfcnr to https://i.imgur.com/E6mfcnr.png
-                        imageUrl = imageUrl.replace('imgur.com/', 'i.imgur.com/');
-                        if (!imageUrl.match(/\.(png|jpg|jpeg)$/i)) {
-                            imageUrl += '.png';
+                    let useProxy = false;
+                    if (imageUrl.includes('imgur.com')) {
+                        // Extract image ID from any imgur URL format
+                        const match = imageUrl.match(/imgur\.com\/([a-zA-Z0-9]+)/);
+                        if (match && match[1]) {
+                            const imageId = match[1];
+                            // Use server callback to get base64 image
+                            useProxy = true;
+                            imageUrl = `https://i.imgur.com/${imageId}.png`;
                         }
                     }
                     
-                    // Set referrer policy to avoid CORS issues with some hosts
-                    previewImg.referrerPolicy = 'no-referrer';
-                    // Try anonymous CORS first
-                    previewImg.crossOrigin = 'anonymous';
+                    // For imgur, try multiple approaches
+                    const isImgur = imageUrl.includes('imgur.com');
                     
-                    console.log('Attempting to load image from URL:', imageUrl);
-                    previewImg.src = imageUrl;
                     previewImg.style.cssText = `
                         width: 100%;
                         height: 100%;
@@ -971,23 +979,70 @@ const Components = {
                         background: var(--color-bg-tertiary);
                     `;
                     
+                    // Try loading imgur images with different formats
+                    let imgurAttempts = 0;
+                    const imgurFormats = ['.png', '.jpg', '.jpeg'];
+                    
+                    const tryLoadImgur = (formatIndex = 0) => {
+                        if (formatIndex >= imgurFormats.length) {
+                            // All formats failed
+                            console.error('All imgur formats failed to load');
+                            loadingText.textContent = 'Image failed to load\n(Imgur may be blocked)';
+                            loadingText.style.color = 'var(--color-error)';
+                            loadingText.style.fontSize = '11px';
+                            loadingText.style.textAlign = 'center';
+                            loadingText.style.whiteSpace = 'pre-line';
+                            return;
+                        }
+                        
+                        // Extract image ID and try different format
+                        const match = imageUrl.match(/i\.imgur\.com\/([a-zA-Z0-9]+)/);
+                        if (match && match[1]) {
+                            const imageId = match[1];
+                            const testUrl = `https://i.imgur.com/${imageId}${imgurFormats[formatIndex]}`;
+                            console.log(`Trying imgur format ${imgurFormats[formatIndex]}:`, testUrl);
+                            
+                            // Create fresh image element for each attempt
+                            const testImg = new Image();
+                            testImg.onload = () => {
+                                console.log('Imgur image loaded with format:', imgurFormats[formatIndex]);
+                                previewImg.src = testUrl;
+                                loadingText.style.display = 'none';
+                            };
+                            testImg.onerror = () => {
+                                console.log(`Format ${imgurFormats[formatIndex]} failed, trying next...`);
+                                tryLoadImgur(formatIndex + 1);
+                            };
+                            testImg.src = testUrl;
+                        }
+                    };
+                    
+                    // Set up load handler
                     previewImg.onload = () => {
                         console.log('Preview image loaded successfully:', imageUrl);
                         loadingText.style.display = 'none';
                     };
+                    
+                    // Set up error handler
                     previewImg.onerror = (e) => {
-                        console.error('Failed to load preview image with crossOrigin=anonymous:', imageUrl);
-                        console.error('Original URL was:', previewUrl);
+                        console.error('Failed to load preview image:', imageUrl);
                         
-                        // Try without crossOrigin (some hosts don't support CORS)
-                        console.log('Retrying without crossOrigin attribute...');
-                        previewImg.removeAttribute('crossOrigin');
-                        previewImg.src = ''; // Clear first
-                        previewImg.src = imageUrl;
-                        
-                        // If that also fails, try fetch as fallback with caching
-                        previewImg.onerror = () => {
-                            console.error('Direct load also failed, trying fetch + blob method with cache...');
+                        if (isImgur) {
+                            // Try different image formats
+                            tryLoadImgur();
+                        } else {
+                            // For non-imgur, try with CORS first
+                            if (!previewImg.crossOrigin) {
+                                console.log('Retrying with CORS...');
+                                previewImg.crossOrigin = 'anonymous';
+                                previewImg.referrerPolicy = 'no-referrer';
+                                previewImg.src = '';
+                                previewImg.src = imageUrl;
+                                return;
+                            }
+                            
+                            // If CORS also failed, try fetch method
+                            console.log('Trying fetch + blob method...');
                             loadingText.textContent = 'Loading...';
                             
                             // Use ImageCache which handles retries and caching
@@ -996,7 +1051,6 @@ const Components = {
                                 console.log('Successfully loaded image as blob via cache');
                                 previewImg.src = blobUrl;
                                 loadingText.style.display = 'none';
-                                // Store image URL for cleanup (don't revoke immediately, cache handles it)
                                 optionElement._cachedImageUrl = imageUrl;
                             })
                             .catch(err => {
@@ -1004,6 +1058,8 @@ const Components = {
                                 let errorMsg = 'Image failed to load';
                                 if (err.message.includes('429')) {
                                     errorMsg = 'Rate limited by image host\n(Please wait a moment)';
+                                } else if (err.message.includes('CORS') || err.message.includes('cors')) {
+                                    errorMsg = 'CORS error: Image host blocks cross-origin requests\nTry using a direct image link';
                                 } else {
                                     errorMsg += '\n(' + err.message + ')';
                                 }
@@ -1013,8 +1069,45 @@ const Components = {
                                 loadingText.style.textAlign = 'center';
                                 loadingText.style.whiteSpace = 'pre-line';
                             });
-                        };
+                        }
                     };
+                    
+                    // Start loading - for imgur, use server callback to get base64
+                    if (useProxy) {
+                        // Fetch image via server callback to bypass CORS
+                        Utils.sendNuiCallback('getImageProxy', { imageUrl: imageUrl })
+                        .then(response => {
+                            // Parse JSON response
+                            return response.json ? response.json() : response;
+                        })
+                        .then(data => {
+                            console.log('Proxy response:', data);
+                            if (data && data.success && data.imageData) {
+                                previewImg.src = data.imageData;
+                                loadingText.style.display = 'none';
+                            } else {
+                                console.error('Proxy returned invalid data:', data);
+                                throw new Error('Failed to fetch image via proxy: ' + (data ? JSON.stringify(data) : 'No response'));
+                            }
+                        })
+                        .catch(err => {
+                            console.error('Proxy fetch failed:', err);
+                            console.error('Image URL was:', imageUrl);
+                            loadingText.textContent = 'Image failed to load\n(Proxy error)';
+                            loadingText.style.color = 'var(--color-error)';
+                            loadingText.style.fontSize = '11px';
+                            loadingText.style.textAlign = 'center';
+                            loadingText.style.whiteSpace = 'pre-line';
+                        });
+                    } else if (isImgur) {
+                        // Don't set any attributes for imgur - let it load naturally
+                        previewImg.src = imageUrl;
+                    } else {
+                        // For non-imgur, use CORS
+                        previewImg.crossOrigin = 'anonymous';
+                        previewImg.referrerPolicy = 'no-referrer';
+                        previewImg.src = imageUrl;
+                    }
                     
                     previewTooltip.appendChild(previewImg);
                     document.body.appendChild(previewTooltip);
@@ -2543,16 +2636,32 @@ const MenuHandlers = {
                         'https://example.com/map-preview.png', // Placeholder text
                         (url) => {
                             if (url) {
-                                // Validate URL ends with .png or .jpg
-                                const urlLower = url.toLowerCase().trim();
-                                if (!urlLower.endsWith('.png') && !urlLower.endsWith('.jpg') && !urlLower.endsWith('.jpeg')) {
-                                    DialogManager.showError('URL must end with .png, .jpg, or .jpeg');
-                                    return;
+                                let finalUrl = url.trim();
+                                
+                                // Normalize imgur URLs
+                                if (finalUrl.includes('imgur.com')) {
+                                    // Convert imgur.com/ID or i.imgur.com/ID to i.imgur.com/ID.png
+                                    if (finalUrl.includes('imgur.com/')) {
+                                        // Extract the image ID
+                                        const match = finalUrl.match(/imgur\.com\/([a-zA-Z0-9]+)/);
+                                        if (match && match[1]) {
+                                            const imageId = match[1];
+                                            // Remove any existing extension and add .png
+                                            finalUrl = `https://i.imgur.com/${imageId}.png`;
+                                        }
+                                    }
+                                } else {
+                                    // For non-imgur URLs, validate they end with image extension
+                                    const urlLower = finalUrl.toLowerCase();
+                                    if (!urlLower.endsWith('.png') && !urlLower.endsWith('.jpg') && !urlLower.endsWith('.jpeg')) {
+                                        DialogManager.showError('URL must end with .png, .jpg, or .jpeg');
+                                        return;
+                                    }
                                 }
                                 
                                 // Basic URL validation
                                 try {
-                                    new URL(url);
+                                    new URL(finalUrl);
                                 } catch (e) {
                                     DialogManager.showError('Invalid URL format');
                                     return;
@@ -2560,7 +2669,7 @@ const MenuHandlers = {
                                 
                                 Utils.sendNuiCallback('setMapPreviewImage', { 
                                     mapId: map.id, 
-                                    previewImage: url.trim()
+                                    previewImage: finalUrl
                                 }).then(() => {
                                     // Refresh dashboard
                                     const menu = MenuManager.get(MENU_IDS.ADMIN_DASHBOARD);
