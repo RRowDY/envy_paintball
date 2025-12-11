@@ -1944,8 +1944,8 @@ const MenuHandlers = {
             style: { flex: '1', padding: '12px' }
         });
         
-        buttonContainer.appendChild(cancelBtn);
         buttonContainer.appendChild(createBtn);
+        buttonContainer.appendChild(cancelBtn);
         formContainer.appendChild(buttonContainer);
         
         content.appendChild(formContainer);
