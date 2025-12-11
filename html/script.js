@@ -1417,9 +1417,12 @@ const MenuHandlers = {
         content.innerHTML = '';
         
         gameModes.forEach(mode => {
+            const playerCountText = mode.minPlayers === mode.maxPlayers 
+                ? null 
+                : `Players: ${mode.minPlayers}-${mode.maxPlayers}`;
             const item = Components.createMenuItem(
                 mode.name,
-                `Players: ${mode.minPlayers}-${mode.maxPlayers}`,
+                playerCountText,
                 () => {
                     // Navigating to map selection - set navigation flag
                     MenuManager.isNavigating = true;
@@ -1625,7 +1628,9 @@ const MenuHandlers = {
         const gameModeOptions = !gameModes || gameModes.length === 0 
             ? [{ text: 'No game modes available', value: null }]
             : gameModes.map(mode => ({
-                text: `${mode.name} (${mode.minPlayers}-${mode.maxPlayers} players)`,
+                text: mode.minPlayers === mode.maxPlayers 
+                    ? mode.name 
+                    : `${mode.name} (${mode.minPlayers}-${mode.maxPlayers} players)`,
                 value: mode.id,
                 data: mode
             }));
