@@ -28,6 +28,8 @@ local editorZone = nil
 local previewZone = nil
 local zoneDrawThreads = {} -- Track threads that draw zones
 local spawnProtected = false
+local uiCloseTime = 0
+local UI_COOLDOWN = 500 -- 0.5 seconds cooldown after UI closes
 local selectedSpawnIndex = nil -- Track which spawn is selected for highlighting
 local spawnProtectionTime = 0
 local isDead = false
@@ -155,7 +157,10 @@ CreateThread(function()
                 ShowPressEUI(textCoords, "Press ~eb~E~s~ to open paintball menu", distance, Config.InteractionDistance)
 
                 if IsControlJustPressed(0, Config.InteractionKey) and not inMatch then
-                    if myMatchId then
+                    -- Check cooldown - prevent opening UI immediately after closing
+                    local currentTime = GetGameTimer()
+                    if currentTime - uiCloseTime >= UI_COOLDOWN then
+                        if myMatchId then
                         ESX.TriggerServerCallback('envy_paintball:getMatchData', function(matchData)
                             if matchData then
                                 myMatchData = matchData
@@ -178,14 +183,15 @@ CreateThread(function()
                                 canStartMatch = canStartMatch
                             })
                         end, myMatchId)
-                    else
-                        SetNuiFocus(true, true)
-                        SendNUIMessage({
-                            action = 'showMainMenu',
-                            hasMatch = false,
-                            inMatch = currentMatchId ~= nil,
-                            canStartMatch = false
-                        })
+                        else
+                            SetNuiFocus(true, true)
+                            SendNUIMessage({
+                                action = 'showMainMenu',
+                                hasMatch = false,
+                                inMatch = currentMatchId ~= nil,
+                                canStartMatch = false
+                            })
+                        end
                     end
                 end
             else
@@ -214,6 +220,19 @@ function OpenGameModeMenu()
         action = 'showGameModes',
         gameModes = Config.GameModes
     })
+end
+
+function OpenCreateMatchForm()
+    ESX.TriggerServerCallback('envy_paintball:getMaps', function(maps)
+        SetNuiFocus(false, false)
+        Wait(50)
+        SetNuiFocus(true, true)
+        SendNUIMessage({
+            action = 'showCreateMatchForm',
+            gameModes = Config.GameModes,
+            maps = maps or {}
+        })
+    end)
 end
 
 function OpenMatchBrowser()
@@ -449,6 +468,50 @@ RegisterNUICallback('loadMapForEdit', function(data, cb)
     cb('ok')
 end)
 
+RegisterNUICallback('setMapPreviewImage', function(data, cb)
+    local mapId = data.mapId
+    local previewImage = data.previewImage
+    
+    if not mapId or not previewImage then
+        ESX.ShowNotification("Invalid map ID or preview image!", "error", 3000)
+        cb('ok')
+        return
+    end
+    
+    TriggerServerEvent('envy_paintball:setMapPreviewImage', mapId, previewImage)
+    cb('ok')
+end)
+
+RegisterNUICallback('getImageProxy', function(data, cb)
+    local imageUrl = data.imageUrl
+    if not imageUrl then
+        cb({ success = false })
+        return
+    end
+    
+    ESX.TriggerServerCallback('envy_paintball:getImageProxy', function(imageData)
+        if imageData then
+            cb({ success = true, imageData = imageData })
+        else
+            cb({ success = false })
+        end
+    end, imageUrl)
+end)
+
+RegisterNUICallback('renameMap', function(data, cb)
+    local mapId = data.mapId
+    local newName = data.newName
+    
+    if not mapId or not newName or newName == "" then
+        ESX.ShowNotification("Invalid map ID or name!", "error", 3000)
+        cb('ok')
+        return
+    end
+    
+    TriggerServerEvent('envy_paintball:renameMap', mapId, newName)
+    cb('ok')
+end)
+
 RegisterNUICallback('deleteMap', function(data, cb)
     local mapId = data.mapId
     
@@ -477,7 +540,7 @@ RegisterNUICallback('mainAction', function(data, cb)
     if action == 'create' then
         SendNUIMessage({ action = 'hideMenu', menu = 'main' })
         Wait(200)
-        OpenGameModeMenu()
+        OpenCreateMatchForm()
     elseif action == 'browse' then
         SendNUIMessage({ action = 'hideMenu', menu = 'main' })
         Wait(200)
@@ -563,13 +626,6 @@ RegisterNUICallback('joinMatch', function(data, cb)
 end)
 
 RegisterNUICallback('selectWeapon', function(data, cb)
-    if not currentMatchId then
-        ESX.ShowNotification("You are not in a match!", "error")
-        SetNuiFocus(false, false)
-        cb('ok')
-        return
-    end
-    
     ESX.TriggerServerCallback('envy_paintball:getWeapons', function(categories, weapons)
         if not categories or not weapons then
             ESX.ShowNotification("Failed to load weapons!", "error")
@@ -583,7 +639,7 @@ RegisterNUICallback('selectWeapon', function(data, cb)
             action = 'showWeaponSelection',
             categories = categories,
             weapons = weapons,
-            forMatch = true
+            forMatch = currentMatchId ~= nil
         })
     end)
     
@@ -611,6 +667,7 @@ RegisterNUICallback('closeMenu', function(data, cb)
     CreateThread(function()
         Wait(50)
         SetNuiFocus(false, false)
+        uiCloseTime = GetGameTimer() -- Set cooldown when UI closes
     end)
     
     cb('ok')

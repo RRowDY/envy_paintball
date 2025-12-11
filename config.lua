@@ -15,16 +15,16 @@ Config.MaxDistanceFromPed = 35 -- Maximum distance from PED before being removed
 -- Game Modes
 Config.GameModes = {
     {
-        name = "1v1 Ramps",
-        id = "1v1_ramps",
+        name = "1v1",
+        id = "1v1",
         minPlayers = 2,
         maxPlayers = 2,
         teams = 2,
         playersPerTeam = 1
     },
     {
-        name = "2v2 Ramps",
-        id = "2v2_ramps",
+        name = "2v2",
+        id = "2v2",
         minPlayers = 4,
         maxPlayers = 4,
         teams = 2,

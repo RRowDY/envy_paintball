@@ -1,5 +1,102 @@
 local ESX = exports['es_extended']:getSharedObject()
 
+local function base64encode(data)
+    local b = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    return ((data:gsub(".", function(x)
+        local r, b = "", x:byte()
+        for i = 8, 1, -1 do
+            r = r .. (b % 2 ^ i - b % 2 ^ (i - 1) > 0 and "1" or "0")
+        end
+        return r
+    end) .. "0000"):gsub("%d%d%d?%d?%d?%d?", function(x)
+        if (#x < 6) then
+            return ""
+        end
+        local c = 0
+        for i = 1, 6 do
+            c = c + (x:sub(i, i) == "1" and 2 ^ (6 - i) or 0)
+        end
+        return b:sub(c + 1, c + 1)
+    end) .. ({"", "==", "="})[#data % 3 + 1])
+end
+
+ESX.RegisterServerCallback('envy_paintball:getImageProxy', function(source, cb, imageUrl)
+    if not imageUrl or type(imageUrl) ~= 'string' then
+        cb(nil)
+        return
+    end
+    
+    if not string.find(imageUrl, 'imgur%.com') then
+        cb(nil)
+        return
+    end
+    
+    local normalizedUrl = imageUrl
+    if string.find(imageUrl, 'imgur%.com') then
+        local imageId = string.match(imageUrl, 'imgur%.com/([a-zA-Z0-9]+)')
+        if imageId then
+            normalizedUrl = 'https://i.imgur.com/' .. imageId .. '.png'
+        end
+    end
+    
+    PerformHttpRequest(normalizedUrl, function(statusCode, data, headers)
+        if statusCode == 200 and data and #data > 0 then
+            local success, base64Data = pcall(function()
+                return base64encode(data)
+            end)
+            
+            if success and base64Data then
+                local dataUri = 'data:image/png;base64,' .. base64Data
+                cb(dataUri)
+            else
+                cb(nil)
+            end
+        else
+            local formats = {'.jpg', '.jpeg'}
+            local formatIndex = 1
+            
+            local function tryNextFormat()
+                if formatIndex > #formats then
+                    cb(nil)
+                    return
+                end
+                
+                local imageId = string.match(imageUrl, 'imgur%.com/([a-zA-Z0-9]+)')
+                if imageId then
+                    local testUrl = 'https://i.imgur.com/' .. imageId .. formats[formatIndex]
+                    PerformHttpRequest(testUrl, function(statusCode2, data2)
+                        if statusCode2 == 200 and data2 and #data2 > 0 then
+                            local success, base64Data = pcall(function()
+                                return base64encode(data2)
+                            end)
+                            
+                            if success and base64Data then
+                                local mimeType = 'image/jpeg'
+                                local dataUri = 'data:' .. mimeType .. ';base64,' .. base64Data
+                                cb(dataUri)
+                            else
+                                formatIndex = formatIndex + 1
+                                tryNextFormat()
+                            end
+                        else
+                            formatIndex = formatIndex + 1
+                            tryNextFormat()
+                        end
+                    end, 'GET', '', {
+                        ['User-Agent'] = 'FiveM-Resource'
+                    })
+                else
+                    cb(nil)
+                end
+            end
+            
+            tryNextFormat()
+        end
+    end, 'GET', '', {
+        ['User-Agent'] = 'FiveM-Resource'
+    })
+end)
+
 -- ============================================================================
 -- DATA STRUCTURES
 -- ============================================================================
@@ -12,6 +109,7 @@ local weapons = {}
 local playerCoords = {} -- Server-side coordinate tracking for distance validation
 local allowedLicenses = {} -- List of licenses that have admin access {license = "license:xxx", cfxName = "Joshua"}
 local ghostedPlayers = {} -- Track which players are currently ghosted (spawn protection)
+local playerWeaponPreferences = {} -- Store weapon preferences for players when not in a match
 
 -- ============================================================================
 -- HELPER FUNCTIONS
@@ -242,13 +340,26 @@ end
 -- ============================================================================
 
 function LoadMaps()
-    local file = LoadResourceFile(GetCurrentResourceName(), 'maps.lua')
+    local file = LoadResourceFile(GetCurrentResourceName(), 'maps.json')
     if file then
-        local success, result = pcall(load(file))
+        local success, result = pcall(json.decode, file)
         if success and result then
-            maps = result
+            maps = {}
+            -- Convert JSON data back to Lua format with vector3
+            for _, mapData in ipairs(result) do
+                local map = {
+                    id = mapData.id,
+                    name = mapData.name,
+                    center = vector3(mapData.center.x, mapData.center.y, mapData.center.z),
+                    radius = mapData.radius,
+                    spawns = mapData.spawns or {},
+                    previewImage = mapData.previewImage -- Include preview image
+                }
+                table.insert(maps, map)
+            end
         else
             maps = {}
+            SaveMaps()
         end
     else
         maps = {}
@@ -257,32 +368,29 @@ function LoadMaps()
 end
 
 function SaveMaps()
-    local content = "-- Paintball Maps\n-- Auto-generated by Envy Paintball\n\nreturn {\n"
-    
-    for i, map in ipairs(maps) do
-        content = content .. string.format("    {\n")
-        content = content .. string.format("        id = \"%s\",\n", map.id)
-        content = content .. string.format("        name = \"%s\",\n", map.name)
-        content = content .. string.format("        center = vector3(%.2f, %.2f, %.2f),\n", map.center.x, map.center.y, map.center.z)
-        content = content .. string.format("        radius = %.2f,\n", map.radius)
-        content = content .. string.format("        spawns = {\n")
-        
-        for j, spawn in ipairs(map.spawns) do
-            if spawn.team then
-                content = content .. string.format("            {x = %.2f, y = %.2f, z = %.2f, w = %.2f, team = %d},\n", spawn.x, spawn.y, spawn.z, spawn.w or 0.0, spawn.team)
-            else
-                content = content .. string.format("            {x = %.2f, y = %.2f, z = %.2f, w = %.2f},\n", spawn.x, spawn.y, spawn.z, spawn.w or 0.0)
-            end
+    -- Convert maps to JSON format
+    local jsonData = {}
+    for _, map in ipairs(maps) do
+        local mapData = {
+            id = map.id,
+            name = map.name,
+            center = {
+                x = map.center.x,
+                y = map.center.y,
+                z = map.center.z
+            },
+            radius = map.radius,
+            spawns = map.spawns or {}
+        }
+        -- Only include previewImage if it exists (to keep JSON clean)
+        if map.previewImage then
+            mapData.previewImage = map.previewImage
         end
-        
-        content = content .. "        }\n"
-        content = content .. "    }"
-        if i < #maps then content = content .. "," end
-        content = content .. "\n"
+        table.insert(jsonData, mapData)
     end
     
-    content = content .. "}\n"
-    SaveResourceFile(GetCurrentResourceName(), 'maps.lua', content, -1)
+    local content = json.encode(jsonData, {indent = true})
+    SaveResourceFile(GetCurrentResourceName(), 'maps.json', content, -1)
 end
 
 -- ============================================================================
@@ -290,26 +398,14 @@ end
 -- ============================================================================
 
 function LoadLicenses()
-    local file = LoadResourceFile(GetCurrentResourceName(), 'licenses.lua')
+    local file = LoadResourceFile(GetCurrentResourceName(), 'licenses.json')
     if file then
-        local success, result = pcall(load(file))
+        local success, result = pcall(json.decode, file)
         if success and result then
-            -- Handle both old format (array of strings) and new format (array of tables)
-            allowedLicenses = {}
-            for i, item in ipairs(result) do
-                if type(item) == "string" then
-                    -- Old format - just license string
-                    table.insert(allowedLicenses, { license = item, cfxName = nil })
-                elseif type(item) == "table" then
-                    -- New format - table with license and cfxName
-                    table.insert(allowedLicenses, {
-                        license = item.license or item[1] or "",
-                        cfxName = item.cfxName or nil
-                    })
-                end
-            end
+            allowedLicenses = result
         else
             allowedLicenses = {}
+            SaveLicenses()
         end
     else
         allowedLicenses = {}
@@ -318,20 +414,8 @@ function LoadLicenses()
 end
 
 function SaveLicenses()
-    local content = "-- Paintball Allowed Licenses\n-- Auto-generated by Envy Paintball\n-- Only the owner can manage these licenses\n\nreturn {\n"
-    
-    for i, licenseData in ipairs(allowedLicenses) do
-        if licenseData.cfxName then
-            content = content .. string.format("    { license = \"%s\", cfxName = \"%s\" }", licenseData.license, licenseData.cfxName)
-        else
-            content = content .. string.format("    { license = \"%s\" }", licenseData.license)
-        end
-        if i < #allowedLicenses then content = content .. "," end
-        content = content .. "\n"
-    end
-    
-    content = content .. "}\n"
-    SaveResourceFile(GetCurrentResourceName(), 'licenses.lua', content, -1)
+    local content = json.encode(allowedLicenses, {indent = true})
+    SaveResourceFile(GetCurrentResourceName(), 'licenses.json', content, -1)
 end
 
 -- ============================================================================
@@ -339,9 +423,9 @@ end
 -- ============================================================================
 
 function LoadWeaponConfig()
-    local file = LoadResourceFile(GetCurrentResourceName(), 'weapons.lua')
+    local file = LoadResourceFile(GetCurrentResourceName(), 'weapons.json')
     if file then
-        local success, result = pcall(load(file))
+        local success, result = pcall(json.decode, file)
         if success and result then
             weapons = result.weapons or {}
         else
@@ -358,18 +442,11 @@ function InitializeDefaultWeapons()
 end
 
 function SaveWeaponConfig()
-    local content = "-- Paintball Weapons Configuration\n-- Auto-generated by Envy Paintball\n-- Categories are defined in config.lua\n\nreturn {\n"
-    content = content .. "    weapons = {\n"
-    
-    for i, weapon in ipairs(weapons) do
-        content = content .. string.format("        { hash = %s, name = \"%s\", category = \"%s\", enabled = %s }", weapon.hash, weapon.name, weapon.category, tostring(weapon.enabled))
-        if i < #weapons then content = content .. "," end
-        content = content .. "\n"
-    end
-    
-    content = content .. "    }\n"
-    content = content .. "}\n"
-    SaveResourceFile(GetCurrentResourceName(), 'weapons.lua', content, -1)
+    local jsonData = {
+        weapons = weapons
+    }
+    local content = json.encode(jsonData, {indent = true})
+    SaveResourceFile(GetCurrentResourceName(), 'weapons.json', content, -1)
 end
 
 -- ============================================================================
@@ -424,7 +501,6 @@ local function UpdateScoreboard(match)
             scoreboardData.teamScores[i] = match.teamScores[i] or 0
         end
         -- Debug: Print team scores being sent
-        print(string.format("[Scoreboard Update] TDM - Team 1: %d, Team 2: %d", scoreboardData.teamScores[1] or 0, scoreboardData.teamScores[2] or 0))
     elseif gameModeId == "2v2_ramps" then
         -- 2v2: Use stored team scores (same as TDM)
         for i = 1, match.gameMode.teams do
@@ -1156,6 +1232,15 @@ RegisterNetEvent('envy_paintball:startMatch', function(gameModeId, mapId, isPriv
 
     activeMatches[matchId] = match
     playerMatches[source] = matchId
+    
+    -- Apply weapon preference if host has one
+    if playerWeaponPreferences[source] then
+        local preferredWeapon = playerWeaponPreferences[source]
+        local isValid, weapon = ValidateWeapon(preferredWeapon)
+        if isValid then
+            match.playerWeapons[source] = preferredWeapon
+        end
+    end
 
     TriggerClientEvent('envy_paintball:matchStarted', source, match)
     TriggerClientEvent('ESX:Notify', source, "success", 5000, string.format("Match created! Waiting for players... (%d/%d)", 1, gameMode.maxPlayers))
@@ -1298,6 +1383,18 @@ RegisterNetEvent('envy_paintball:joinMatch', function(matchId, pin)
     if not match.playerDeaths then
         match.playerDeaths = {}
     end
+    
+    -- Apply weapon preference if player has one
+    if playerWeaponPreferences[source] then
+        local preferredWeapon = playerWeaponPreferences[source]
+        local isValid, weapon = ValidateWeapon(preferredWeapon)
+        if isValid then
+            if not match.playerWeapons then
+                match.playerWeapons = {}
+            end
+            match.playerWeapons[source] = preferredWeapon
+        end
+    end
     match.playerScores[source] = 0
     match.playerKills[source] = 0
     match.playerDeaths[source] = 0
@@ -1348,17 +1445,6 @@ RegisterNetEvent('envy_paintball:setPlayerWeapon', function(weaponHash)
         return
     end
     
-    local match, matchId = GetPlayerMatch(source)
-    if not match then
-        TriggerClientEvent('ESX:Notify', source, "error", 5000, "You are not in a match")
-        return
-    end
-    
-    if match.status == "active" then
-        TriggerClientEvent('ESX:Notify', source, "error", 5000, "Cannot change weapon after match has started")
-        return
-    end
-    
     -- Validate weapon
     local isValid, weapon = ValidateWeapon(weaponHash)
     if not isValid then
@@ -1366,13 +1452,27 @@ RegisterNetEvent('envy_paintball:setPlayerWeapon', function(weaponHash)
         return
     end
     
-    -- Store selection
-    if not match.playerWeapons then
-        match.playerWeapons = {}
-    end
-    match.playerWeapons[source] = weaponHash
+    local match, matchId = GetPlayerMatch(source)
     
-    TriggerClientEvent('ESX:Notify', source, "success", 5000, string.format("Selected weapon: %s", weapon.name))
+    if match then
+        -- Player is in a match
+        if match.status == "active" then
+            TriggerClientEvent('ESX:Notify', source, "error", 5000, "Cannot change weapon after match has started")
+            return
+        end
+        
+        -- Store selection for current match
+        if not match.playerWeapons then
+            match.playerWeapons = {}
+        end
+        match.playerWeapons[source] = weaponHash
+        
+        TriggerClientEvent('ESX:Notify', source, "success", 5000, string.format("Selected weapon: %s", weapon.name))
+    else
+        -- Player is not in a match - save as preference
+        playerWeaponPreferences[source] = weaponHash
+        TriggerClientEvent('ESX:Notify', source, "success", 5000, string.format("Weapon preference set to: %s (will be applied when you join a match)", weapon.name))
+    end
 end)
 
 -- ============================================================================
@@ -1437,6 +1537,19 @@ RegisterNetEvent('envy_paintball:saveMap', function(mapData)
         radius = mapData.radius,
         spawns = spawns
     }
+    
+    -- Preserve preview image if it exists
+    local existingMap = nil
+    for i, map in ipairs(maps) do
+        if map.id == newMap.id then
+            existingMap = map
+            break
+        end
+    end
+    
+    if existingMap and existingMap.previewImage then
+        newMap.previewImage = existingMap.previewImage
+    end
 
     -- Update or insert
     local found = false
@@ -1454,6 +1567,96 @@ RegisterNetEvent('envy_paintball:saveMap', function(mapData)
 
     SaveMaps()
     TriggerClientEvent('ESX:Notify', source, "success", 5000, string.format("Map '%s' saved successfully!", newMap.name))
+end)
+
+RegisterNetEvent('envy_paintball:setMapPreviewImage', function(mapId, previewImage)
+    local source = source
+    
+    if not IsAdmin(source) then
+        TriggerClientEvent('ESX:Notify', source, "error", 5000, "You don't have permission to set map preview images")
+        return
+    end
+    
+    if not mapId or type(mapId) ~= 'string' or #mapId == 0 then
+        TriggerClientEvent('ESX:Notify', source, "error", 5000, "Invalid map ID")
+        return
+    end
+    
+    if not previewImage or type(previewImage) ~= 'string' or #previewImage == 0 then
+        TriggerClientEvent('ESX:Notify', source, "error", 5000, "Invalid preview image URL")
+        return
+    end
+    
+    -- Normalize imgur URLs and validate
+    local normalizedUrl = previewImage
+    if string.find(string.lower(previewImage), "imgur%.com") then
+        -- Extract image ID from imgur URL
+        local imageId = string.match(previewImage, "imgur%.com/([a-zA-Z0-9]+)")
+        if imageId then
+            -- Normalize to direct image format
+            normalizedUrl = "https://i.imgur.com/" .. imageId .. ".png"
+        end
+    else
+        -- For non-imgur URLs, validate they end with image extension
+        local urlLower = string.lower(previewImage)
+        if not (string.match(urlLower, "%.png$") or string.match(urlLower, "%.jpg$") or string.match(urlLower, "%.jpeg$")) then
+            TriggerClientEvent('ESX:Notify', source, "error", 5000, "URL must end with .png, .jpg, or .jpeg")
+            return
+        end
+    end
+    
+    -- Find and update map
+    local found = false
+    for i, map in ipairs(maps) do
+        if map.id == mapId then
+            maps[i].previewImage = normalizedUrl
+            found = true
+            break
+        end
+    end
+    
+    if found then
+        SaveMaps()
+        TriggerClientEvent('ESX:Notify', source, "success", 5000, "Map preview image updated successfully!")
+    else
+        TriggerClientEvent('ESX:Notify', source, "error", 5000, "Map not found")
+    end
+end)
+
+RegisterNetEvent('envy_paintball:renameMap', function(mapId, newName)
+    local source = source
+    
+    if not IsAdmin(source) then
+        TriggerClientEvent('ESX:Notify', source, "error", 5000, "You don't have permission to rename maps")
+        return
+    end
+    
+    if not mapId or type(mapId) ~= 'string' or #mapId == 0 then
+        TriggerClientEvent('ESX:Notify', source, "error", 5000, "Invalid map ID")
+        return
+    end
+    
+    if not newName or type(newName) ~= 'string' or #newName == 0 then
+        TriggerClientEvent('ESX:Notify', source, "error", 5000, "Invalid map name")
+        return
+    end
+    
+    -- Find and update map name
+    local found = false
+    for i, map in ipairs(maps) do
+        if map.id == mapId then
+            maps[i].name = newName
+            found = true
+            break
+        end
+    end
+    
+    if found then
+        SaveMaps()
+        TriggerClientEvent('ESX:Notify', source, "success", 5000, string.format("Map renamed to '%s' successfully!", newName))
+    else
+        TriggerClientEvent('ESX:Notify', source, "error", 5000, "Map not found")
+    end
 end)
 
 RegisterNetEvent('envy_paintball:deleteMap', function(mapId)

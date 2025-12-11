@@ -31,7 +31,144 @@ const MENU_IDS = {
     CONFIRM: 'confirm',
     ADMIN_DASHBOARD: 'admin-dashboard',
     SPAWN_VIEWER: 'spawn-viewer',
+    CREATE_MATCH: 'create-match',
 };
+
+// ============================================================================
+// IMAGE CACHE - Cache loaded images to avoid re-fetching
+// ============================================================================
+const ImageCache = {
+    cache: new Map(), // URL -> blob URL
+    loading: new Map(), // URL -> Promise
+    
+    async getBlobUrl(imageUrl) {
+        // Return cached blob URL if available
+        if (this.cache.has(imageUrl)) {
+            return this.cache.get(imageUrl);
+        }
+        
+        // If already loading, return the existing promise
+        if (this.loading.has(imageUrl)) {
+            return this.loading.get(imageUrl);
+        }
+        
+        // Start loading
+        const loadPromise = this.loadImage(imageUrl);
+        this.loading.set(imageUrl, loadPromise);
+        
+        try {
+            const blobUrl = await loadPromise;
+            this.cache.set(imageUrl, blobUrl);
+            return blobUrl;
+        } catch (err) {
+            throw err;
+        } finally {
+            this.loading.delete(imageUrl);
+        }
+    },
+    
+    async loadImage(imageUrl, retryCount = 0) {
+        const maxRetries = 5; // Increased from 3 to 5
+        const baseDelay = 2000; // 2 seconds base delay (increased from 1s)
+        const maxDelay = 30000; // Cap at 30 seconds max delay
+        
+        // For imgur, images should load directly without fetch (they work in img tags)
+        // Only use fetch for other hosts that might need CORS handling
+        const isImgur = imageUrl.includes('imgur.com');
+        
+        if (isImgur) {
+            // For imgur, return the URL directly - it will work in img tags
+            return imageUrl;
+        }
+        
+        try {
+            const response = await fetch(imageUrl, {
+                mode: 'cors',
+                referrerPolicy: 'no-referrer',
+                cache: 'default' // Use cache to avoid repeated requests
+            });
+            
+            if (response.status === 429 && retryCount < maxRetries) {
+                // Rate limited - wait with exponential backoff (capped)
+                const delay = Math.min(baseDelay * Math.pow(2, retryCount), maxDelay);
+                const delaySeconds = (delay / 1000).toFixed(1);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                return this.loadImage(imageUrl, retryCount + 1);
+            }
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            const blob = await response.blob();
+            return URL.createObjectURL(blob);
+        } catch (err) {
+            if ((err.message.includes('429') || err.message.includes('Rate limited')) && retryCount < maxRetries) {
+                // Retry on 429 with exponential backoff (capped)
+                const delay = Math.min(baseDelay * Math.pow(2, retryCount), maxDelay);
+                const delaySeconds = (delay / 1000).toFixed(1);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                return this.loadImage(imageUrl, retryCount + 1);
+            }
+            throw err;
+        }
+    },
+    
+    revoke(imageUrl) {
+        if (this.cache.has(imageUrl)) {
+            URL.revokeObjectURL(this.cache.get(imageUrl));
+            this.cache.delete(imageUrl);
+        }
+    },
+    
+    clear() {
+        this.cache.forEach(blobUrl => URL.revokeObjectURL(blobUrl));
+        this.cache.clear();
+        this.loading.clear();
+    }
+};
+
+// ============================================================================
+// DROPDOWN MANAGER - Global registry for managing all dropdowns
+// ============================================================================
+const DropdownManager = {
+    openDropdowns: new Set(),
+    
+    register(dropdown) {
+        this.openDropdowns.add(dropdown);
+    },
+    
+    unregister(dropdown) {
+        this.openDropdowns.delete(dropdown);
+    },
+    
+    closeAll(except = null) {
+        this.openDropdowns.forEach(dropdown => {
+            if (dropdown !== except && dropdown.close) {
+                dropdown.close();
+            }
+        });
+    },
+    
+    init() {
+        // Single global click handler for closing dropdowns
+        document.addEventListener('click', (e) => {
+            let clickedInsideDropdown = false;
+            this.openDropdowns.forEach(dropdown => {
+                if (dropdown.container && dropdown.container.contains(e.target)) {
+                    clickedInsideDropdown = true;
+                }
+            });
+            
+            if (!clickedInsideDropdown) {
+                this.closeAll();
+            }
+        });
+    }
+};
+
+// Initialize dropdown manager
+DropdownManager.init();
 
 // ============================================================================
 // UTILITY FUNCTIONS
@@ -53,7 +190,6 @@ const Utils = {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data),
         }).catch(error => {
-            console.error(`NUI callback error (${event}):`, error);
             return { ok: false };
         });
     },
@@ -152,6 +288,7 @@ const MenuManager = {
             { id: MENU_IDS.ERROR, title: 'Error', isDialog: true },
             { id: MENU_IDS.CONFIRM, title: 'Confirm', isDialog: true },
             { id: MENU_IDS.SPAWN_VIEWER, title: 'Spawn Viewer', isDialog: false },
+            { id: MENU_IDS.CREATE_MATCH, title: 'Create Match', isDialog: false },
         ];
         
         menuConfigs.forEach(config => {
@@ -258,7 +395,7 @@ const MenuManager = {
                 if (closeBtn) {
                     closeBtn.addEventListener('click', () => {
                         // Special handling for dialogs opened from dashboard - don't release focus if dashboard is open
-                        if (config.id === MENU_IDS.PLAYER_SEARCH || config.id === MENU_IDS.WEAPON_SELECT || config.id === MENU_IDS.CATEGORY_SELECT) {
+                        if (config.id === MENU_IDS.PLAYER_SEARCH || config.id === MENU_IDS.WEAPON_SELECT || config.id === MENU_IDS.CATEGORY_SELECT || config.id === MENU_IDS.DIALOG) {
                             const dashboardMenu = this.get(MENU_IDS.ADMIN_DASHBOARD);
                             if (dashboardMenu && dashboardMenu.classList.contains('active')) {
                                 this.hide(config.id, { checkFocusRelease: false });
@@ -299,6 +436,7 @@ const MenuManager = {
             [MENU_IDS.WEAPON_SELECT]: 'Add Weapon',
             [MENU_IDS.ERROR]: 'Error',
             [MENU_IDS.CONFIRM]: 'Confirm',
+            [MENU_IDS.CREATE_MATCH]: 'Create Match',
         };
         return titles[menuId] || 'Menu';
     },
@@ -623,6 +761,553 @@ const Components = {
             element.style.display = 'none';
         }, CONFIG.ERROR_DISPLAY_DURATION);
     },
+
+    /**
+     * Create a custom dropdown that looks like menu items
+     */
+    createCustomDropdown(options, placeholder, onSelect) {
+        const dropdownContainer = document.createElement('div');
+        dropdownContainer.className = 'custom-dropdown';
+        dropdownContainer.style.position = 'relative';
+        dropdownContainer.style.width = '100%';
+        
+        const dropdownButton = document.createElement('div');
+        dropdownButton.className = 'custom-dropdown-button';
+        dropdownButton.style.cssText = `
+            background: var(--color-bg-tertiary);
+            border: 1px solid var(--color-primary-dark);
+            border-radius: var(--radius-lg);
+            padding: var(--spacing-lg);
+            color: var(--color-text-primary);
+            font-size: var(--font-size-base);
+            font-family: var(--font-family);
+            cursor: pointer;
+            transition: all var(--transition-normal);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: relative;
+        `;
+        
+        const buttonText = document.createElement('span');
+        buttonText.textContent = placeholder;
+        buttonText.style.color = 'var(--color-text-secondary)';
+        dropdownButton.appendChild(buttonText);
+        
+        const arrowIcon = document.createElement('span');
+        arrowIcon.innerHTML = '▼';
+        arrowIcon.style.cssText = `
+            color: var(--color-primary);
+            font-size: 10px;
+            transition: transform var(--transition-normal);
+            margin-left: 8px;
+        `;
+        dropdownButton.appendChild(arrowIcon);
+        
+        const dropdownMenu = document.createElement('div');
+        dropdownMenu.className = 'custom-dropdown-menu';
+        dropdownMenu.style.cssText = `
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            right: 0;
+            background: var(--color-bg-secondary);
+            border: 1px solid var(--color-primary-dark);
+            border-radius: var(--radius-lg);
+            max-height: 250px;
+            overflow-y: auto;
+            overflow-x: hidden;
+            z-index: 1000;
+            display: none;
+            box-shadow: var(--shadow-lg);
+        `;
+        
+        let isOpen = false;
+        let selectedValue = null;
+        let selectedText = placeholder;
+        
+        const updateButton = () => {
+            buttonText.textContent = selectedText;
+            buttonText.style.color = selectedValue ? 'var(--color-text-primary)' : 'var(--color-text-secondary)';
+        };
+        
+        const closeDropdown = () => {
+            if (!isOpen) return;
+            isOpen = false;
+            dropdownMenu.style.display = 'none';
+            arrowIcon.style.transform = 'rotate(0deg)';
+            dropdownButton.style.borderColor = 'var(--color-primary-dark)';
+            dropdownButton.style.boxShadow = 'none';
+            DropdownManager.unregister(dropdownContainer);
+            
+            // Clean up any preview tooltips (blob URLs are cached, don't revoke here)
+            const options = dropdownMenu.querySelectorAll('.custom-dropdown-option');
+            options.forEach(optionEl => {
+                if (optionEl._previewTooltip) {
+                    optionEl._previewTooltip.style.display = 'none';
+                }
+                // The cache will be cleared when the menu is fully closed if needed
+            });
+        };
+        
+        const openDropdown = () => {
+            // Close all other dropdowns first
+            DropdownManager.closeAll(dropdownContainer);
+            
+            isOpen = true;
+            dropdownMenu.style.display = 'block';
+            arrowIcon.style.transform = 'rotate(180deg)';
+            dropdownButton.style.borderColor = 'var(--color-primary-light)';
+            dropdownButton.style.boxShadow = 'var(--shadow-primary)';
+            DropdownManager.register(dropdownContainer);
+        };
+        
+        // Store close function on container for DropdownManager
+        dropdownContainer.close = closeDropdown;
+        dropdownContainer.container = dropdownContainer;
+        
+        dropdownButton.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (isOpen) {
+                closeDropdown();
+            } else {
+                openDropdown();
+            }
+        });
+        
+        // Create options
+        if (!options || options.length === 0) {
+            const emptyOption = document.createElement('div');
+            emptyOption.className = 'custom-dropdown-option';
+            emptyOption.style.cssText = `
+                padding: var(--spacing-lg);
+                color: var(--color-text-tertiary);
+                cursor: default;
+            `;
+            emptyOption.textContent = 'No options available';
+            dropdownMenu.appendChild(emptyOption);
+        } else {
+            options.forEach(option => {
+                const optionElement = document.createElement('div');
+                optionElement.className = 'custom-dropdown-option';
+                optionElement.style.cssText = `
+                    padding: var(--spacing-lg);
+                    color: var(--color-text-primary);
+                    cursor: pointer;
+                    transition: all var(--transition-normal);
+                    border-left: 3px solid transparent;
+                    border-bottom: 1px solid rgba(9, 135, 255, 0.1);
+                    position: relative;
+                `;
+                
+                const textSpan = document.createElement('span');
+                if (option.text) {
+                    textSpan.textContent = option.text;
+                } else {
+                    textSpan.textContent = option;
+                }
+                textSpan.style.cssText = `
+                    display: inline-block;
+                    transition: transform var(--transition-normal);
+                `;
+                optionElement.appendChild(textSpan);
+                
+                // Add preview image support if available
+                let previewTooltip = null;
+                if (option.data && option.data.previewImage) {
+                    const previewUrl = option.data.previewImage;
+                    
+                    // Create tooltip container - append to body to avoid overflow clipping
+                    previewTooltip = document.createElement('div');
+                    previewTooltip.className = 'dropdown-preview-tooltip';
+                    previewTooltip.style.cssText = `
+                        position: fixed;
+                        width: 300px;
+                        height: 200px;
+                        background: var(--color-bg-secondary);
+                        border: 2px solid var(--color-primary);
+                        border-radius: var(--radius-lg);
+                        z-index: 1000001;
+                        display: none;
+                        overflow: hidden;
+                        box-shadow: var(--shadow-lg);
+                        pointer-events: none;
+                    `;
+                    
+                    // Add loading placeholder
+                    const loadingText = document.createElement('div');
+                    loadingText.textContent = 'Loading...';
+                    loadingText.style.cssText = `
+                        position: absolute;
+                        top: 50%;
+                        left: 50%;
+                        transform: translate(-50%, -50%);
+                        color: var(--color-text-secondary);
+                        font-size: 12px;
+                        z-index: 1;
+                    `;
+                    previewTooltip.appendChild(loadingText);
+                    
+                    const previewImg = document.createElement('img');
+                    // Normalize imgur URLs and use server callback to bypass CORS
+                    let imageUrl = previewUrl;
+                    let useProxy = false;
+                    if (imageUrl.includes('imgur.com')) {
+                        // Extract image ID from any imgur URL format
+                        const match = imageUrl.match(/imgur\.com\/([a-zA-Z0-9]+)/);
+                        if (match && match[1]) {
+                            const imageId = match[1];
+                            useProxy = true;
+                            imageUrl = `https://i.imgur.com/${imageId}.png`;
+                        }
+                    }
+                    
+                    const isImgur = imageUrl.includes('imgur.com');
+                    
+                    previewImg.style.cssText = `
+                        width: 100%;
+                        height: 100%;
+                        object-fit: cover;
+                        display: block;
+                        background: var(--color-bg-tertiary);
+                    `;
+                    
+                    // Try loading imgur images with different formats
+                    let imgurAttempts = 0;
+                    const imgurFormats = ['.png', '.jpg', '.jpeg'];
+                    
+                    const tryLoadImgur = (formatIndex = 0) => {
+                        if (formatIndex >= imgurFormats.length) {
+                            loadingText.textContent = 'Image failed to load\n(Imgur may be blocked)';
+                            loadingText.style.color = 'var(--color-error)';
+                            loadingText.style.fontSize = '11px';
+                            loadingText.style.textAlign = 'center';
+                            loadingText.style.whiteSpace = 'pre-line';
+                            return;
+                        }
+                        
+                        const match = imageUrl.match(/i\.imgur\.com\/([a-zA-Z0-9]+)/);
+                        if (match && match[1]) {
+                            const imageId = match[1];
+                            const testUrl = `https://i.imgur.com/${imageId}${imgurFormats[formatIndex]}`;
+                            
+                            // Create fresh image element for each attempt
+                            const testImg = new Image();
+                            testImg.onload = () => {
+                                previewImg.src = testUrl;
+                                loadingText.style.display = 'none';
+                            };
+                            testImg.onerror = () => {
+                                tryLoadImgur(formatIndex + 1);
+                            };
+                            testImg.src = testUrl;
+                        }
+                    };
+                    
+                    previewImg.onload = () => {
+                        loadingText.style.display = 'none';
+                    };
+                    
+                    previewImg.onerror = (e) => {
+                        
+                        if (isImgur) {
+                            tryLoadImgur();
+                        } else {
+                            if (!previewImg.crossOrigin) {
+                                previewImg.crossOrigin = 'anonymous';
+                                previewImg.referrerPolicy = 'no-referrer';
+                                previewImg.src = '';
+                                previewImg.src = imageUrl;
+                                return;
+                            }
+                            
+                            loadingText.textContent = 'Loading...';
+                            
+                            ImageCache.getBlobUrl(imageUrl)
+                            .then(blobUrl => {
+                                previewImg.src = blobUrl;
+                                loadingText.style.display = 'none';
+                                optionElement._cachedImageUrl = imageUrl;
+                            })
+                            .catch(err => {
+                                let errorMsg = 'Image failed to load';
+                                if (err.message.includes('429')) {
+                                    errorMsg = 'Rate limited by image host\n(Please wait a moment)';
+                                } else if (err.message.includes('CORS') || err.message.includes('cors')) {
+                                    errorMsg = 'CORS error: Image host blocks cross-origin requests\nTry using a direct image link';
+                                } else {
+                                    errorMsg += '\n(' + err.message + ')';
+                                }
+                                loadingText.textContent = errorMsg;
+                                loadingText.style.color = 'var(--color-error)';
+                                loadingText.style.fontSize = '11px';
+                                loadingText.style.textAlign = 'center';
+                                loadingText.style.whiteSpace = 'pre-line';
+                            });
+                        }
+                    };
+                    
+                    if (useProxy) {
+                        Utils.sendNuiCallback('getImageProxy', { imageUrl: imageUrl })
+                        .then(response => {
+                            // Parse JSON response
+                            return response.json ? response.json() : response;
+                        })
+                        .then(data => {
+                            if (data && data.success && data.imageData) {
+                                previewImg.src = data.imageData;
+                                loadingText.style.display = 'none';
+                            } else {
+                                throw new Error('Failed to fetch image via proxy');
+                            }
+                        })
+                        .catch(err => {
+                            loadingText.textContent = 'Image failed to load\n(Proxy error)';
+                            loadingText.style.color = 'var(--color-error)';
+                            loadingText.style.fontSize = '11px';
+                            loadingText.style.textAlign = 'center';
+                            loadingText.style.whiteSpace = 'pre-line';
+                        });
+                    } else if (isImgur) {
+                        // Don't set any attributes for imgur - let it load naturally
+                        previewImg.src = imageUrl;
+                    } else {
+                        // For non-imgur, use CORS
+                        previewImg.crossOrigin = 'anonymous';
+                        previewImg.referrerPolicy = 'no-referrer';
+                        previewImg.src = imageUrl;
+                    }
+                    
+                    previewTooltip.appendChild(previewImg);
+                    document.body.appendChild(previewTooltip);
+                    
+                    // Store reference for cleanup
+                    optionElement._previewTooltip = previewTooltip;
+                }
+                
+                optionElement.addEventListener('mouseenter', (e) => {
+                    optionElement.style.background = 'var(--color-bg-tertiary-hover)';
+                    optionElement.style.borderLeft = '3px solid var(--color-primary)';
+                    textSpan.style.transform = 'translateX(3px)';
+                    if (previewTooltip) {
+                        const rect = optionElement.getBoundingClientRect();
+                        const tooltipWidth = 300;
+                        const tooltipHeight = 200;
+                        const spacing = 10;
+                        
+                        let left = rect.right + spacing;
+                        let top = rect.top;
+                        
+                        if (left + tooltipWidth > window.innerWidth) {
+                            left = rect.left - tooltipWidth - spacing;
+                        }
+                        
+                        if (top + tooltipHeight > window.innerHeight) {
+                            top = window.innerHeight - tooltipHeight - 10;
+                        }
+                        
+                        if (top < 10) {
+                            top = 10;
+                        }
+                        
+                        previewTooltip.style.left = left + 'px';
+                        previewTooltip.style.top = top + 'px';
+                        previewTooltip.style.display = 'block';
+                    }
+                });
+                
+                optionElement.addEventListener('mouseleave', () => {
+                    optionElement.style.background = '';
+                    optionElement.style.borderLeft = '3px solid transparent';
+                    textSpan.style.transform = 'translateX(0)';
+                    if (previewTooltip) {
+                        previewTooltip.style.display = 'none';
+                    }
+                });
+                
+                optionElement.addEventListener('click', () => {
+                    selectedValue = option.value || option;
+                    selectedText = option.text || option;
+                    updateButton();
+                    closeDropdown();
+                    if (onSelect) {
+                        onSelect(selectedValue, option);
+                    }
+                });
+                
+                dropdownMenu.appendChild(optionElement);
+            });
+        }
+        
+        // Remove last border
+        const lastOption = dropdownMenu.lastElementChild;
+        if (lastOption) {
+            lastOption.style.borderBottom = 'none';
+        }
+        
+        dropdownButton.addEventListener('mouseenter', () => {
+            if (!isOpen) {
+                dropdownButton.style.background = 'var(--color-bg-tertiary-hover)';
+                dropdownButton.style.borderColor = 'var(--color-primary-light)';
+                dropdownButton.style.boxShadow = 'var(--shadow-primary)';
+            }
+        });
+        
+        dropdownButton.addEventListener('mouseleave', () => {
+            if (!isOpen) {
+                dropdownButton.style.background = 'var(--color-bg-tertiary)';
+                dropdownButton.style.borderColor = 'var(--color-primary-dark)';
+                dropdownButton.style.boxShadow = 'none';
+            }
+        });
+        
+        dropdownContainer.appendChild(dropdownButton);
+        dropdownContainer.appendChild(dropdownMenu);
+        
+        // Expose methods
+        dropdownContainer.getValue = () => selectedValue;
+        dropdownContainer.getText = () => selectedText;
+        dropdownContainer.setValue = (value) => {
+            const option = options.find(opt => (opt.value || opt) === value);
+            if (option) {
+                selectedValue = option.value || option;
+                selectedText = option.text || option;
+                updateButton();
+            }
+        };
+        
+        return dropdownContainer;
+    },
+
+    /**
+     * Create a context menu dropdown (for "..." buttons)
+     */
+    createContextMenu(options, buttonText = '...') {
+        const container = document.createElement('div');
+        container.style.position = 'relative';
+        container.style.display = 'inline-block';
+
+        const button = Components.createButton(buttonText, () => {}, 'secondary', {
+            style: {
+                padding: '6px 12px',
+                fontSize: '14px',
+                minWidth: '32px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+            }
+        });
+        
+        const menu = document.createElement('div');
+        menu.style.cssText = `
+            position: absolute;
+            top: calc(100% + 4px);
+            right: 0;
+            background: var(--color-bg-secondary);
+            border: 1px solid var(--color-primary-dark);
+            border-radius: var(--radius-lg);
+            min-width: 150px;
+            z-index: 1000;
+            display: none;
+            box-shadow: var(--shadow-lg);
+            overflow: hidden;
+        `;
+
+        options.forEach((option, index) => {
+            const menuItem = document.createElement('div');
+            const isFirst = index === 0;
+            const isLast = index === options.length - 1;
+            menuItem.style.cssText = `
+                padding: var(--spacing-md) var(--spacing-lg);
+                color: var(--color-text-primary);
+                cursor: pointer;
+                transition: all var(--transition-normal);
+                border-left: 3px solid transparent;
+                border-bottom: ${index < options.length - 1 ? '1px solid rgba(9, 135, 255, 0.1)' : 'none'};
+                ${isFirst ? 'border-top-left-radius: var(--radius-lg);' : ''}
+                ${isLast ? 'border-bottom-left-radius: var(--radius-lg);' : ''}
+                font-size: var(--font-size-base);
+                font-family: var(--font-family);
+            `;
+            
+            const textSpan = document.createElement('span');
+            textSpan.textContent = option.label;
+            textSpan.style.cssText = `
+                display: inline-block;
+                transition: transform var(--transition-normal);
+            `;
+            
+            if (option.danger) {
+                menuItem.style.color = '#ff4444';
+                textSpan.style.color = '#ff4444';
+            }
+            
+            menuItem.appendChild(textSpan);
+            
+            menuItem.addEventListener('mouseenter', () => {
+                if (option.danger) {
+                    menuItem.style.background = 'rgba(255, 68, 68, 0.15)';
+                    menuItem.style.borderLeft = '3px solid #ff4444';
+                } else {
+                    menuItem.style.background = 'var(--color-bg-tertiary-hover)';
+                    menuItem.style.borderLeft = '3px solid var(--color-primary)';
+                }
+                textSpan.style.transform = 'translateX(3px)';
+            });
+            
+            menuItem.addEventListener('mouseleave', () => {
+                menuItem.style.background = '';
+                menuItem.style.borderLeft = '3px solid transparent';
+                textSpan.style.transform = 'translateX(0)';
+            });
+            
+            menuItem.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (option.onClick) {
+                    option.onClick();
+                }
+                menu.style.display = 'none';
+                DropdownManager.unregister({ container: menu });
+            });
+            
+            menu.appendChild(menuItem);
+        });
+
+        const contextMenu = {
+            container: container,
+            button: button,
+            menu: menu,
+            isOpen: false,
+            open() {
+                DropdownManager.closeAll(this);
+                menu.style.display = 'block';
+                this.isOpen = true;
+                DropdownManager.register(this);
+            },
+            close() {
+                menu.style.display = 'none';
+                this.isOpen = false;
+                DropdownManager.unregister(this);
+            },
+            toggle() {
+                if (this.isOpen) {
+                    this.close();
+                } else {
+                    this.open();
+                }
+            }
+        };
+
+        button.addEventListener('click', (e) => {
+            e.stopPropagation();
+            contextMenu.toggle();
+        });
+
+        container.appendChild(button);
+        container.appendChild(menu);
+
+        return contextMenu;
+    },
 };
 
 // ============================================================================
@@ -925,9 +1610,12 @@ const MenuHandlers = {
         content.innerHTML = '';
         
         gameModes.forEach(mode => {
+            const playerCountText = mode.minPlayers === mode.maxPlayers 
+                ? null 
+                : `Players: ${mode.minPlayers}-${mode.maxPlayers}`;
             const item = Components.createMenuItem(
                 mode.name,
-                `Players: ${mode.minPlayers}-${mode.maxPlayers}`,
+                playerCountText,
                 () => {
                     // Navigating to map selection - set navigation flag
                     MenuManager.isNavigating = true;
@@ -962,7 +1650,7 @@ const MenuHandlers = {
             maps.forEach(map => {
                 const item = Components.createMenuItem(
                     map.name,
-                    `Spawns: ${map.spawns.length} | Radius: ${map.radius.toFixed(1)}m`,
+                    null,
                     () => {
                         if (options.forDeleting) {
                             DialogManager.showConfirm(
@@ -1012,19 +1700,19 @@ const MenuHandlers = {
                         () => {
                             MenuManager.hide(MENU_IDS.CONFIRM);
                             Utils.sendNuiCallback('closeMatch').then(() => {
-                                // Only hide main menu, don't release focus - we're navigating to game mode selection
+                                // Only hide main menu, don't release focus - we're navigating to create match form
                                 MenuManager.isNavigating = true;
                                 MenuManager.hide(MENU_IDS.MAIN, { checkFocusRelease: false });
-                                // Navigate to game mode selection - this is intentional navigation
+                                // Navigate to create match form - this is intentional navigation
                                 Utils.sendNuiCallback('mainAction', { action: 'create' });
                             });
                         }
                     );
                 } else {
-                    // Only hide main menu, don't release focus - we're navigating to game mode selection
+                    // Only hide main menu, don't release focus - we're navigating to create match form
                     MenuManager.isNavigating = true;
                     MenuManager.hide(MENU_IDS.MAIN, { checkFocusRelease: false });
-                    // Navigate to game mode selection - this is intentional navigation
+                    // Navigate to create match form - this is intentional navigation
                     Utils.sendNuiCallback('mainAction', { action: 'create' });
                 }
             },
@@ -1039,6 +1727,16 @@ const MenuHandlers = {
                 Utils.sendNuiCallback('mainAction', { action: 'browse' });
             },
             },
+        {
+            title: 'Select Weapon',
+            description: 'Choose your weapon for matches',
+            onClick: () => {
+                // Navigating to weapon selection - set navigation flag
+                MenuManager.isNavigating = true;
+                MenuManager.hide(MENU_IDS.MAIN, { checkFocusRelease: false });
+                Utils.sendNuiCallback('selectWeapon');
+            },
+        },
         ];
         
     if (canStartMatch) {
@@ -1052,19 +1750,6 @@ const MenuHandlers = {
                 },
             });
         }
-        
-    if (inMatch) {
-        items.push({
-            title: 'Select Weapon',
-            description: 'Choose your weapon for this match',
-            onClick: () => {
-                // Navigating to weapon selection - set navigation flag
-                MenuManager.isNavigating = true;
-                MenuManager.hide(MENU_IDS.MAIN, { checkFocusRelease: false });
-                Utils.sendNuiCallback('selectWeapon');
-            },
-        });
-    }
         
     if (hasMatch) {
         items.push({
@@ -1083,6 +1768,241 @@ const MenuHandlers = {
         });
         
         MenuManager.show(MENU_IDS.MAIN);
+    },
+
+    /**
+     * Display create match form
+     */
+    displayCreateMatchForm(gameModes, maps) {
+        const content = MenuManager.getContent(MENU_IDS.CREATE_MATCH);
+        if (!content) return;
+        
+        content.innerHTML = '';
+        
+        // Form state
+        let selectedGameMode = null;
+        let selectedMap = null;
+        let isPrivate = false;
+        let pinValue = '';
+        
+        // Create form container
+        const formContainer = document.createElement('div');
+        formContainer.style.display = 'flex';
+        formContainer.style.flexDirection = 'column';
+        formContainer.style.gap = '15px';
+        formContainer.style.padding = '10px 0';
+        
+        // Error message element
+        const errorMsg = document.createElement('div');
+        errorMsg.className = 'error-message';
+        errorMsg.style.display = 'none';
+        errorMsg.style.color = '#ff4444';
+        errorMsg.style.padding = '10px';
+        errorMsg.style.marginBottom = '10px';
+        errorMsg.style.borderRadius = '4px';
+        errorMsg.style.backgroundColor = 'rgba(255, 68, 68, 0.1)';
+        formContainer.appendChild(errorMsg);
+        
+        const showError = (message) => {
+            errorMsg.textContent = message;
+            errorMsg.style.display = 'block';
+            setTimeout(() => {
+                errorMsg.style.display = 'none';
+            }, 5000);
+        };
+        
+        // Game Mode Selection
+        const gameModeLabel = document.createElement('div');
+        gameModeLabel.className = 'menu-item-title';
+        gameModeLabel.textContent = 'Select Game Mode';
+        gameModeLabel.style.marginBottom = '8px';
+        formContainer.appendChild(gameModeLabel);
+        
+        const gameModeOptions = !gameModes || gameModes.length === 0 
+            ? [{ text: 'No game modes available', value: null }]
+            : gameModes.map(mode => ({
+                text: mode.minPlayers === mode.maxPlayers 
+                    ? mode.name 
+                    : `${mode.name} (${mode.minPlayers}-${mode.maxPlayers} players)`,
+                value: mode.id,
+                data: mode
+            }));
+        
+        const gameModeDropdown = Components.createCustomDropdown(
+            gameModeOptions,
+            '-- Select Game Mode --',
+            (value, option) => {
+                if (option && option.data) {
+                    selectedGameMode = option.data;
+                } else {
+                    selectedGameMode = null;
+                }
+            }
+        );
+        
+        formContainer.appendChild(gameModeDropdown);
+        
+        // Map Selection
+        const mapLabel = document.createElement('div');
+        mapLabel.className = 'menu-item-title';
+        mapLabel.textContent = 'Select Map';
+        mapLabel.style.marginTop = '10px';
+        mapLabel.style.marginBottom = '8px';
+        formContainer.appendChild(mapLabel);
+        
+        const mapOptions = !maps || maps.length === 0
+            ? [{ text: 'No maps available', value: null }]
+            : maps.map(map => {
+                return {
+                    text: map.name,
+                    value: map.id,
+                    data: map
+                };
+            });
+        
+        const mapDropdown = Components.createCustomDropdown(
+            mapOptions,
+            '-- Select Map --',
+            (value, option) => {
+                if (option && option.data) {
+                    selectedMap = option.data;
+                } else {
+                    selectedMap = null;
+                }
+            }
+        );
+        
+        formContainer.appendChild(mapDropdown);
+        
+        // Privacy Toggle
+        const privacyLabel = document.createElement('div');
+        privacyLabel.className = 'menu-item-title';
+        privacyLabel.textContent = 'Match Privacy';
+        privacyLabel.style.marginTop = '10px';
+        privacyLabel.style.marginBottom = '8px';
+        formContainer.appendChild(privacyLabel);
+        
+        const privacyContainer = document.createElement('div');
+        privacyContainer.style.display = 'flex';
+        privacyContainer.style.gap = '10px';
+        
+        const publicOption = Components.createMenuItem(
+            '🌐 Public',
+            'Anyone can join',
+            () => {
+                isPrivate = false;
+                pinInputContainer.classList.remove('pin-input-visible');
+                pinInputContainer.classList.add('pin-input-hidden');
+                publicOption.style.backgroundColor = 'rgba(9, 135, 255, 0.2)';
+                publicOption.style.border = '2px solid #0987ff';
+                privateOption.style.backgroundColor = '';
+                privateOption.style.border = '';
+            }
+        );
+        publicOption.style.flex = '1';
+        publicOption.style.textAlign = 'center';
+        publicOption.style.padding = '12px';
+        publicOption.style.cursor = 'pointer';
+        publicOption.style.borderRadius = '4px';
+        publicOption.style.backgroundColor = 'rgba(9, 135, 255, 0.2)';
+        publicOption.style.border = '2px solid #0987ff';
+        isPrivate = false; // Default to public
+        
+        const privateOption = Components.createMenuItem(
+            '🔒 Private',
+            'Requires PIN to join',
+            () => {
+                isPrivate = true;
+                pinInputContainer.classList.remove('pin-input-hidden');
+                pinInputContainer.classList.add('pin-input-visible');
+                privateOption.style.backgroundColor = 'rgba(9, 135, 255, 0.2)';
+                privateOption.style.border = '2px solid #0987ff';
+                publicOption.style.backgroundColor = '';
+                publicOption.style.border = '';
+            }
+        );
+        privateOption.style.flex = '1';
+        privateOption.style.textAlign = 'center';
+        privateOption.style.padding = '12px';
+        privateOption.style.cursor = 'pointer';
+        privateOption.style.border = '2px solid rgba(255, 255, 255, 0.1)';
+        privateOption.style.borderRadius = '4px';
+        
+        privacyContainer.appendChild(publicOption);
+        privacyContainer.appendChild(privateOption);
+        formContainer.appendChild(privacyContainer);
+        
+        // PIN Input (hidden by default)
+        const pinInputContainer = document.createElement('div');
+        pinInputContainer.className = 'pin-input-container pin-input-hidden';
+        pinInputContainer.style.marginTop = '10px';
+        
+        const pinLabel = document.createElement('div');
+        pinLabel.className = 'menu-item-title';
+        pinLabel.textContent = 'PIN Code';
+        pinLabel.style.marginBottom = '8px';
+        pinInputContainer.appendChild(pinLabel);
+        
+        const pinInput = Components.createInput('Enter PIN (4-8 digits)', {
+            type: 'text',
+            maxLength: 8
+        });
+        pinInput.style.width = '100%';
+        pinInput.style.padding = '10px';
+        pinInput.style.marginBottom = '10px';
+        pinInput.addEventListener('input', (e) => {
+            // Only allow numbers
+            e.target.value = e.target.value.replace(/[^0-9]/g, '');
+            pinValue = e.target.value;
+        });
+        pinInputContainer.appendChild(pinInput);
+        formContainer.appendChild(pinInputContainer);
+        
+        // Create Button
+        const buttonContainer = document.createElement('div');
+        buttonContainer.style.display = 'flex';
+        buttonContainer.style.gap = '10px';
+        buttonContainer.style.marginTop = '20px';
+        
+        const createBtn = Components.createButton('Create Match', () => {
+            // Validation
+            if (!selectedGameMode) {
+                showError('Please select a game mode');
+                return;
+            }
+            if (!selectedMap) {
+                showError('Please select a map');
+                return;
+            }
+            if (isPrivate && (!pinValue || pinValue.length < 4 || pinValue.length > 8)) {
+                showError('Please enter a PIN (4-8 digits)');
+                return;
+            }
+            
+            // Submit
+            MenuManager.hideAll();
+            Utils.sendNuiCallback('createMatch', {
+                gameModeId: selectedGameMode.id,
+                mapId: selectedMap.id,
+                isPrivate: isPrivate,
+                pin: isPrivate ? pinValue : null
+            });
+        }, 'primary', {
+            style: { flex: '1', padding: '12px' }
+        });
+        
+        const cancelBtn = Components.createButton('Cancel', () => {
+            MenuManager.hide(MENU_IDS.CREATE_MATCH);
+        }, 'secondary', {
+            style: { flex: '1', padding: '12px' }
+        });
+        
+        buttonContainer.appendChild(createBtn);
+        buttonContainer.appendChild(cancelBtn);
+        formContainer.appendChild(buttonContainer);
+        
+        content.appendChild(formContainer);
+        MenuManager.show(MENU_IDS.CREATE_MATCH);
     },
 
     /**
@@ -1176,14 +2096,12 @@ const MenuHandlers = {
         catData.weapons.forEach(weapon => {
             const item = Components.createMenuItem(
                 weapon.name,
-                `Select ${weapon.name} for this match`,
+                forMatch ? `Select ${weapon.name} for this match` : `Set ${weapon.name} as your weapon preference`,
                 () => {
-                    if (forMatch) {
-                        // Selecting weapon closes UI - release focus
-                        MenuManager.isNavigating = false;
-                        MenuManager.hideAll();
-                        Utils.sendNuiCallback('setPlayerWeapon', { weaponHash: weapon.hash });
-                    }
+                    // Selecting weapon closes UI - release focus
+                    MenuManager.isNavigating = false;
+                    MenuManager.hideAll();
+                    Utils.sendNuiCallback('setPlayerWeapon', { weaponHash: weapon.hash });
                 }
             );
             content.appendChild(item);
@@ -1450,7 +2368,6 @@ const MenuHandlers = {
     displayAdminDashboard(data) {
         const menu = MenuManager.get(MENU_IDS.ADMIN_DASHBOARD);
         if (!menu) {
-            console.error('Dashboard menu not found');
             return;
         }
 
@@ -1467,16 +2384,7 @@ const MenuHandlers = {
         const tabContents = menu.querySelectorAll('.dashboard-tab-content');
         
         if (tabs.length === 0 || tabContents.length === 0) {
-            console.error('Dashboard tabs or content not found', { 
-                tabs: tabs.length, 
-                contents: tabContents.length,
-                menuHTML: menu.innerHTML.substring(0, 500)
-            });
-            // Try to recreate the dashboard structure
             const contentWrapper = menu.querySelector('.dashboard-content-wrapper');
-            if (!contentWrapper) {
-                console.error('Dashboard content wrapper not found, menu structure may be incorrect');
-            }
             return;
         }
         
@@ -1582,20 +2490,17 @@ const MenuHandlers = {
     refreshDashboardTab(tabName, data) {
         const menu = MenuManager.get(MENU_IDS.ADMIN_DASHBOARD);
         if (!menu) {
-            console.error('Dashboard menu not found for refresh');
             return;
         }
 
         const content = menu.querySelector(`[data-tab-content="${tabName}"]`);
         if (!content) {
-            console.error(`Dashboard tab content not found for: ${tabName}`);
             return;
         }
 
         content.innerHTML = '';
 
         if (!data) {
-            console.warn('No data provided for dashboard refresh');
             return;
         }
         
@@ -1670,38 +2575,126 @@ const MenuHandlers = {
                 const right = document.createElement('div');
                 right.style.cssText = 'display: flex; gap: 8px; align-items: center;';
 
-                const editBtn = Components.createButton('Edit', () => {
-                    MenuManager.hide(MENU_IDS.ADMIN_DASHBOARD);
-                    Utils.sendNuiCallback('loadMapForEdit', { mapId: map.id });
-                }, 'primary', { style: { padding: '6px 12px', fontSize: '12px' } });
-
-                const deleteBtn = Components.createButton('Delete', () => {
-                    DialogManager.showConfirm(
-                        `Are you sure you want to delete map "${map.name}"?\n\nThis action cannot be undone.`,
-                        () => {
-                            // Hide confirm dialog without releasing focus (dashboard is still open)
-                            MenuManager.hide(MENU_IDS.CONFIRM, { checkFocusRelease: false });
-                            const menu = MenuManager.get(MENU_IDS.ADMIN_DASHBOARD);
-                            const currentTab = menu?._currentTab || 'maps';
-                            // Mark as from dashboard to prevent focus release
-                            Utils.sendNuiCallback('deleteMap', { mapId: map.id, fromDashboard: true }).then(() => {
-                                // Refresh dashboard preserving current tab
-                                Utils.sendNuiCallback('refreshDashboard', { preserveTab: currentTab });
-                            });
-                        }
+                // Preview image URL button
+                const previewBtn = Components.createButton('📷 Preview', () => {
+                    // Use saved previewImage if it exists, otherwise use filler text
+                    const currentValue = map.previewImage || 'https://example.com/map-preview.png';
+                    DialogManager.showDialog(
+                        'Enter Preview Image URL',
+                        'https://example.com/map-preview.png', // Placeholder text
+                        (url) => {
+                            if (url) {
+                                let finalUrl = url.trim();
+                                
+                                // Normalize imgur URLs
+                                if (finalUrl.includes('imgur.com')) {
+                                    // Convert imgur.com/ID or i.imgur.com/ID to i.imgur.com/ID.png
+                                    if (finalUrl.includes('imgur.com/')) {
+                                        // Extract the image ID
+                                        const match = finalUrl.match(/imgur\.com\/([a-zA-Z0-9]+)/);
+                                        if (match && match[1]) {
+                                            const imageId = match[1];
+                                            // Remove any existing extension and add .png
+                                            finalUrl = `https://i.imgur.com/${imageId}.png`;
+                                        }
+                                    }
+                                } else {
+                                    // For non-imgur URLs, validate they end with image extension
+                                    const urlLower = finalUrl.toLowerCase();
+                                    if (!urlLower.endsWith('.png') && !urlLower.endsWith('.jpg') && !urlLower.endsWith('.jpeg')) {
+                                        DialogManager.showError('URL must end with .png, .jpg, or .jpeg');
+                                        return;
+                                    }
+                                }
+                                
+                                // Basic URL validation
+                                try {
+                                    new URL(finalUrl);
+                                } catch (e) {
+                                    DialogManager.showError('Invalid URL format');
+                                    return;
+                                }
+                                
+                                Utils.sendNuiCallback('setMapPreviewImage', { 
+                                    mapId: map.id, 
+                                    previewImage: finalUrl
+                                }).then(() => {
+                                    // Refresh dashboard
+                                    const menu = MenuManager.get(MENU_IDS.ADMIN_DASHBOARD);
+                                    const currentTab = menu?._currentTab || 'maps';
+                                    Utils.sendNuiCallback('refreshDashboard', { preserveTab: currentTab });
+                                });
+                            }
+                        },
+                        { value: currentValue } // Pass the current value to auto-fill the input
                     );
-                }, 'secondary', {
-                    style: {
-                        padding: '6px 12px',
+                }, 'secondary', { 
+                    style: { 
+                        padding: '6px 12px', 
                         fontSize: '12px',
-                        background: 'rgba(255, 68, 68, 0.2)',
-                        borderColor: '#ff4444',
-                        color: '#ff4444',
-                    },
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                    } 
                 });
 
-                right.appendChild(editBtn);
-                right.appendChild(deleteBtn);
+                // Context menu with Rename, Edit Map, Delete
+                const contextMenu = Components.createContextMenu([
+                    {
+                        label: 'Rename',
+                        onClick: () => {
+                            DialogManager.showDialog(
+                                'Rename Map',
+                                'Enter new map name',
+                                (newName) => {
+                                    if (newName && newName.trim()) {
+                                        const menu = MenuManager.get(MENU_IDS.ADMIN_DASHBOARD);
+                                        const currentTab = menu?._currentTab || 'maps';
+                                        Utils.sendNuiCallback('renameMap', { 
+                                            mapId: map.id, 
+                                            newName: newName.trim(),
+                                            fromDashboard: true
+                                        }).then(() => {
+                                            // Refresh dashboard preserving current tab
+                                            Utils.sendNuiCallback('refreshDashboard', { preserveTab: currentTab });
+                                        });
+                                    }
+                                },
+                                { value: map.name }
+                            );
+                        }
+                    },
+                    {
+                        label: 'Edit Map',
+                        onClick: () => {
+                            MenuManager.hide(MENU_IDS.ADMIN_DASHBOARD);
+                            Utils.sendNuiCallback('loadMapForEdit', { mapId: map.id });
+                        }
+                    },
+                    {
+                        label: 'Delete',
+                        danger: true,
+                        onClick: () => {
+                            DialogManager.showConfirm(
+                                `Are you sure you want to delete map "${map.name}"?\n\nThis action cannot be undone.`,
+                                () => {
+                                    // Hide confirm dialog without releasing focus (dashboard is still open)
+                                    MenuManager.hide(MENU_IDS.CONFIRM, { checkFocusRelease: false });
+                                    const menu = MenuManager.get(MENU_IDS.ADMIN_DASHBOARD);
+                                    const currentTab = menu?._currentTab || 'maps';
+                                    // Mark as from dashboard to prevent focus release
+                                    Utils.sendNuiCallback('deleteMap', { mapId: map.id, fromDashboard: true }).then(() => {
+                                        // Refresh dashboard preserving current tab
+                                        Utils.sendNuiCallback('refreshDashboard', { preserveTab: currentTab });
+                                    });
+                                }
+                            );
+                        }
+                    }
+                ]);
+
+                right.appendChild(previewBtn);
+                right.appendChild(contextMenu.container);
 
                 item.appendChild(left);
                 item.appendChild(right);
@@ -2010,7 +3003,6 @@ const MenuHandlers = {
     showPlayerSearchDialog() {
         const menu = MenuManager.get(MENU_IDS.PLAYER_SEARCH);
         if (!menu) {
-            console.error("Player search menu not found");
             return;
         }
 
@@ -2025,7 +3017,6 @@ const MenuHandlers = {
         }
 
         if (!content) {
-            console.error("Player search content not found");
             return;
         }
 
@@ -2170,7 +3161,6 @@ const MenuHandlers = {
                         }
                     })
                     .catch((error) => {
-                        console.error('Search error:', error);
                         if (errorEl) {
                             errorEl.textContent = 'Failed to search. Please try again.';
                             errorEl.style.display = 'block';
@@ -2264,10 +3254,15 @@ const DialogManager = {
         };
         
         const cancelHandler = () => {
-            // Canceling dialog - clear navigation flag and release focus
-            // Client won't reopen any menu when dialog is cancelled
+            // Canceling dialog - clear navigation flag
+            // Check if dashboard is still open, if so don't release focus
             MenuManager.isNavigating = false;
-            MenuManager.hide(MENU_IDS.DIALOG);
+            const dashboardMenu = MenuManager.get(MENU_IDS.ADMIN_DASHBOARD);
+            if (dashboardMenu && dashboardMenu.classList.contains('active')) {
+                MenuManager.hide(MENU_IDS.DIALOG, { checkFocusRelease: false });
+            } else {
+                MenuManager.hide(MENU_IDS.DIALOG);
+            }
         };
         
         const enterHandler = (e) => {
@@ -2852,6 +3847,9 @@ window.addEventListener('message', function(event) {
                 forEditing: data.forEditing || false,
                 forDeleting: data.forDeleting || false,
             });
+            break;
+        case 'showCreateMatchForm':
+            MenuHandlers.displayCreateMatchForm(data.gameModes, data.maps);
             break;
         case 'showEditorMainMenu':
             MenuHandlers.displayEditorMainMenu();
